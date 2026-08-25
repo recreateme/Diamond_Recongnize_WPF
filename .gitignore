@@ -1,0 +1,29 @@
+## Build
+**/bin/
+**/obj/
+**/.vs/
+*.user
+*.suo
+
+## Publish / package
+/dist/
+/_wpf_publish/
+
+## Python
+**/__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+
+## App data
+/data/
+/corrections/
+/sahi_output/
+/outputs/
+/logs/
+/build/
+/build_staging/
+
+## Local secrets / machine paths — keep example only if needed
+# app_config.json may contain absolute yolo paths; review before commit
+# Prefer committing app_config.deploy.json as the machine template

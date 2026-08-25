@@ -1,0 +1,86 @@
+<UserControl x:Class="DiamondDetect.Wpf.Views.CorrectionView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <DockPanel>
+        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,10">
+            <TextBlock Style="{StaticResource PageTitleStyle}" Text="误分类修正"/>
+            <TextBlock Text="{Binding CountText}" VerticalAlignment="Center" Margin="16,0,0,0"
+                       Foreground="#E65100" FontWeight="Bold"/>
+            <Button HorizontalAlignment="Right" Content="选择文件夹" Padding="12,6"
+                    Command="{Binding ImportFolderCommand}"
+                    ToolTip="导入本地图像为待重新打标签样本"/>
+        </DockPanel>
+
+        <TextBlock DockPanel.Dock="Top" Style="{StaticResource PageHintStyle}"
+                   Text="可从「结果管理」送入误检，或导入文件夹后点击正确类别，立即归档到 corrections/。"/>
+
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="2.2*"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- 左侧：大图 + 类别 -->
+            <DockPanel Margin="0,0,12,0">
+                <Border DockPanel.Dock="Top" Height="360" Background="#1A1A2E"
+                        BorderBrush="#37474F" BorderThickness="1" CornerRadius="8" Margin="0,0,0,10">
+                    <Grid>
+                        <TextBlock Text="{Binding EmptyHint}" Foreground="#90A4AE" TextWrapping="Wrap"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center" Margin="24"
+                                   Visibility="{Binding HasPending, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}"/>
+                        <Image Source="{Binding CurrentImage}" Stretch="Uniform" Margin="8"
+                               Visibility="{Binding HasPending, Converter={StaticResource BoolToVis}}"/>
+                    </Grid>
+                </Border>
+
+                <DockPanel DockPanel.Dock="Top" Margin="0,0,0,8">
+                    <TextBlock Text="{Binding FileNameText}" FontWeight="Bold" FontSize="14"/>
+                    <TextBlock Text="{Binding PredText}" Foreground="#C62828" HorizontalAlignment="Right"/>
+                </DockPanel>
+
+                <TextBlock DockPanel.Dock="Top" Text="选择正确类别（单击即归档）"
+                           FontWeight="SemiBold" Foreground="#455A64" Margin="0,0,0,8"/>
+
+                <ItemsControl ItemsSource="{Binding ClassNames}" IsEnabled="{Binding HasPending}">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <UniformGrid Columns="3"/>
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Button Content="{Binding}" Margin="4" MinHeight="72" FontSize="18" FontWeight="Bold"
+                                    Foreground="#0D47A1" BorderBrush="#42A5F5" BorderThickness="2"
+                                    Command="{Binding DataContext.ApplyClassCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                    CommandParameter="{Binding}"/>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </DockPanel>
+
+            <!-- 右侧列表 -->
+            <Border Grid.Column="1" Background="{StaticResource CardBrush}"
+                    BorderBrush="#E0E0E0" BorderThickness="1" CornerRadius="8" Padding="10">
+                <DockPanel>
+                    <TextBlock DockPanel.Dock="Top" Text="待修正列表" FontWeight="Bold"
+                               Foreground="#455A64" Margin="0,0,0,8"/>
+                    <TextBlock DockPanel.Dock="Bottom" Text="{Binding ProgressText}"
+                               HorizontalAlignment="Center" Foreground="#78909C" Margin="0,8,0,0"/>
+                    <ListBox ItemsSource="{Binding PendingItems}" SelectedItem="{Binding SelectedItem}"
+                             Style="{StaticResource VirtualizedListBoxStyle}"
+                             BorderThickness="0">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <StackPanel Margin="4">
+                                    <TextBlock Text="{Binding Title}" FontWeight="SemiBold"/>
+                                    <TextBlock Text="{Binding Subtitle}" Foreground="#78909C" FontSize="11"
+                                               TextWrapping="Wrap"/>
+                                </StackPanel>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </DockPanel>
+            </Border>
+        </Grid>
+    </DockPanel>
+</UserControl>

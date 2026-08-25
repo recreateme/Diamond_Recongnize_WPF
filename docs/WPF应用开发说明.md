@@ -1,0 +1,94 @@
+# WPF 应用开发说明
+
+面向在本仓库改界面 / Bridge 的开发者。算法细节见 `python_core/README.md`，契约见 [CONTRACTS.md](CONTRACTS.md)。
+
+---
+
+## 1. 解决方案结构
+
+```
+DiamondDetect.sln
+├── DiamondDetect.Wpf      # Views / ViewModels / Themes（UI）
+├── DiamondDetect.Core     # AppConfig、DetectionResult、ResultStore、接口
+└── DiamondDetect.Bridge   # pythonnet、SAHI、TrainRunner
+```
+
+原则：**UI 不写阈值/softmax；算法只改 python_core。**
+
+---
+
+## 2. 页面与导航
+
+| 索引 | 页面 | View / ViewModel |
+|------|------|------------------|
+| 0 | 钻石检测分类 | `DiamondDetectView` |
+| 1 | 缺陷检测 | `DetectionView` |
+| 2 | 结果管理 | `ResultsView` |
+| 3 | 误分类修正 | `CorrectionView` |
+| 4 | 模型再训练 | `RetrainView` |
+| 5 | 设置 | `SettingsPage` |
+
+跨页共享：`AppSession` + `ResultStore`（DI 单例）。
+
+快捷键：`Ctrl+1…6` 导航，`F5` 刷新结果/修正，`Esc` 停止长任务。
+
+---
+
+## 3. MVVM 与线程
+
+- 绑定属性 / `RelayCommand`（CommunityToolkit.Mvvm）。
+- 长任务：`Task.Run` + `IProgress` + `CancellationToken`；顶栏 `IsBusy` 与进度条联动。
+- **禁止**在后台线程直接改 UI 控件；通过属性变更或 `Dispatcher`。
+- 缩略图请走 `Services/ThumbnailCache`（解码限幅 + LRU），勿全分辨率 `BitmapImage`。
+- 结果列表刷新走增量同步（`ResultsViewModel.ApplyRowsIncremental`），避免筛选时整表重建。
+- 弹窗文案优先 `UserMessage`（附常见排查提示）。
+- Bridge 契约版本：`DiamondDetect.Core.BridgeApi.Version`。
+- 本地诊断：`LocalDiagnostics` + 配置项 `enable_local_diagnostics`（默认关）。
+
+对照原 PyQt：`QThread` + `pyqtSignal` → 上述模式。
+
+---
+
+## 4. Bridge 要点
+
+| 类型 | 作用 |
+|------|------|
+| `PythonRuntimeHost` | 定位 Conda、`PYTHONHOME`、初始化 pythonnet、`sys.path` + `setup_ort_dll_paths` |
+| `PythonInferenceEngine` | `inference_engine` / `inference_engine_onnx` |
+| `PythonSahiPipeline` | `sahi_detector.SahiDetector` + `SahiPipeline` |
+| `ProcessTrainRunner` | 子进程 `train.py` |
+
+环境变量：
+
+- `DIAMOND_PYTHON_HOME` / `DIAMOND_PYTHON_DLL`
+- `DEFECTS_DEPLOY=1` 机台
+- `DEFECTS_VERIFY=1` 或 `--verify` 无 GUI 验收
+
+---
+
+## 5. 新增功能页步骤
+
+1. 在 `Views/` 建 UserControl，在 `ViewModels/` 建 VM。
+2. `App.xaml.cs` 注册单例。
+3. `MainWindow.xaml` 增加 TabItem，code-behind 设 `DataContext`。
+4. 侧栏 RadioButton `CommandParameter` 对齐索引。
+
+---
+
+## 6. 调试建议
+
+```powershell
+$env:DIAMOND_PYTHON_HOME = "D:\Software\MiniAnaconda\envs\cv-yolo"
+dotnet run --project src\DiamondDetect.Wpf
+```
+
+- 先看状态栏是否「模型加载成功」。
+- Bridge 异常看 Output / 弹窗；ORT 问题优先查 DLL 路径。
+- 未处理异常会落盘到 `logs/crash_*.txt`。
+- 改算法后用同一张图对比 `defect_detect` 旧版类别与置信度。
+
+---
+
+## 7. 发布
+
+见 [打包部署说明.md](打包部署说明.md)。日常只改 UI：`scripts\publish_wpf.ps1`。

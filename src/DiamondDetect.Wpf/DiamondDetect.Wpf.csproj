@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\DiamondDetect.Core\DiamondDetect.Core.csproj" />
+    <ProjectReference Include="..\DiamondDetect.Bridge\DiamondDetect.Bridge.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.1" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <ApplicationIcon>..\..\python_core\assets\app.ico</ApplicationIcon>
+    <AssemblyName>DiamondDetect</AssemblyName>
+    <Product>钻石缺陷图像分类系统</Product>
+    <Version>0.1.0</Version>
+  </PropertyGroup>
+
+</Project>

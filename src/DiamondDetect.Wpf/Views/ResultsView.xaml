@@ -1,0 +1,120 @@
+<UserControl x:Class="DiamondDetect.Wpf.Views.ResultsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <DockPanel>
+        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,8">
+            <TextBlock Style="{StaticResource PageTitleStyle}" Text="检测结果管理"/>
+            <TextBlock Text="{Binding StatsText}" VerticalAlignment="Center"
+                       HorizontalAlignment="Right" Foreground="#546E7A"/>
+        </DockPanel>
+
+        <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,8">
+            <TextBlock Text="类别筛选:" VerticalAlignment="Center" Margin="0,0,6,0" Foreground="#546E7A"/>
+            <ComboBox Width="120" ItemsSource="{Binding ClassFilters}"
+                      SelectedItem="{Binding SelectedClassFilter}" Margin="0,0,12,0"/>
+            <TextBlock Text="置信度 ≤" VerticalAlignment="Center" Margin="0,0,6,0" Foreground="#546E7A"/>
+            <Slider Width="140" Minimum="0" Maximum="1" TickFrequency="0.05" IsSnapToTickEnabled="True"
+                    Value="{Binding MaxConfidenceFilter}" VerticalAlignment="Center"/>
+            <TextBlock Text="{Binding MaxConfidenceFilter, StringFormat={}{0:0.00}}"
+                       VerticalAlignment="Center" Margin="6,0,12,0" Width="36"/>
+            <Button Content="{Binding ToggleSelectText}" Margin="0,0,8,0" Padding="10,4"
+                    Command="{Binding ToggleSelectAllCommand}"/>
+            <Button Content="送修正页" Margin="0,0,8,0" Padding="10,4" Background="#F57C00" Foreground="White"
+                    Command="{Binding SendSelectedToCorrectionCommand}"/>
+            <Button Content="当前筛选全部送修正" Margin="0,0,8,0" Padding="10,4" Background="#F57C00" Foreground="White"
+                    Command="{Binding SendVisibleToCorrectionCommand}"/>
+            <Button Content="导出分类结果" Margin="0,0,8,0" Padding="10,4"
+                    Command="{Binding ExportClassifiedCommand}"/>
+            <Button Content="导出 CSV" Padding="10,4" Command="{Binding ExportCsvCommand}"/>
+        </WrapPanel>
+
+        <TextBlock DockPanel.Dock="Top" Margin="0,0,0,8" FontSize="11" Foreground="#78909C"
+                   Text="筛选：先选类别，再调「置信度 ≤」可聚焦低置信度样本。右侧点击正确类别可直接归档。"/>
+
+        <TextBlock DockPanel.Dock="Bottom" Text="{Binding BottomText}" Foreground="#546E7A" FontSize="12"/>
+
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="300"/>
+            </Grid.ColumnDefinitions>
+
+            <DataGrid ItemsSource="{Binding Rows}" SelectedItem="{Binding SelectedRow}"
+                      Style="{StaticResource VirtualizedDataGridStyle}"
+                      RowHeight="64">
+                <DataGrid.ColumnHeaderStyle>
+                    <Style TargetType="DataGridColumnHeader">
+                        <Setter Property="Padding" Value="8,4"/>
+                    </Style>
+                </DataGrid.ColumnHeaderStyle>
+                <DataGrid.Columns>
+                    <DataGridCheckBoxColumn Header="" Binding="{Binding IsChecked, UpdateSourceTrigger=PropertyChanged}" Width="36"/>
+                    <DataGridTemplateColumn Header="缩略图" Width="72">
+                        <DataGridTemplateColumn.CellTemplate>
+                            <DataTemplate>
+                                <Image Source="{Binding Thumbnail}" Width="56" Height="56" Stretch="Uniform"
+                                       RenderOptions.BitmapScalingMode="LowQuality"/>
+                            </DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                    </DataGridTemplateColumn>
+                    <DataGridTextColumn Header="文件名" Binding="{Binding FileName}" Width="*"/>
+                    <DataGridTextColumn Header="预测类别" Binding="{Binding Class}" Width="110"/>
+                    <DataGridTemplateColumn Width="100">
+                        <DataGridTemplateColumn.Header>
+                            <Button Content="{Binding DataContext.ConfidenceHeader, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                    Command="{Binding DataContext.ToggleConfidenceSortCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                    Background="Transparent" BorderThickness="0" Foreground="#1565C0" Cursor="Hand"/>
+                        </DataGridTemplateColumn.Header>
+                        <DataGridTemplateColumn.CellTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding ConfidenceText}" HorizontalAlignment="Center"/>
+                            </DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                    </DataGridTemplateColumn>
+                    <DataGridTemplateColumn Header="操作" Width="90">
+                        <DataGridTemplateColumn.CellTemplate>
+                            <DataTemplate>
+                                <Button Content="送修正" Padding="8,4" Background="#F57C00" Foreground="White"
+                                        Command="{Binding DataContext.SendOneToCorrectionCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                        CommandParameter="{Binding}"/>
+                            </DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                    </DataGridTemplateColumn>
+                </DataGrid.Columns>
+            </DataGrid>
+
+            <DockPanel Grid.Column="1" Margin="12,0,0,0">
+                <Border DockPanel.Dock="Top" Height="280" Background="#FAFBFC"
+                        BorderBrush="#E0E0E0" BorderThickness="1" CornerRadius="6" Margin="0,0,0,10">
+                    <Grid>
+                        <Image Source="{Binding PreviewImage}" Stretch="Uniform" Margin="8"/>
+                        <TextBlock Text="{Binding PreviewMeta}" VerticalAlignment="Bottom"
+                                   Background="#AAFFFFFF" Padding="6" FontSize="11"/>
+                    </Grid>
+                </Border>
+                <Border Background="{StaticResource CardBrush}" BorderBrush="#E0E0E0"
+                        BorderThickness="1" CornerRadius="6" Padding="10">
+                    <DockPanel>
+                        <TextBlock DockPanel.Dock="Top" Text="{Binding ArchiveHint}"
+                                   TextWrapping="Wrap" FontWeight="SemiBold" Foreground="#455A64" Margin="0,0,0,8"/>
+                        <ItemsControl ItemsSource="{Binding ArchiveClasses}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <UniformGrid Columns="2"/>
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Button Content="{Binding}" Margin="4" MinHeight="56" FontWeight="Bold"
+                                            Foreground="#0D47A1" BorderBrush="#42A5F5" BorderThickness="2"
+                                            Command="{Binding DataContext.ArchiveAsClassCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                            CommandParameter="{Binding}"/>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </DockPanel>
+                </Border>
+            </DockPanel>
+        </Grid>
+    </DockPanel>
+</UserControl>

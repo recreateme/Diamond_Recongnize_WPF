@@ -1,0 +1,44 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 18
+VisualStudioVersion = 18.9.12105.275 stable
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{415E16D2-F8C9-477A-8832-1B8B2EEEDAD8}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DiamondDetect.Core", "src\DiamondDetect.Core\DiamondDetect.Core.csproj", "{E0A67C57-38DD-4796-85C7-32B2C4AAD60C}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DiamondDetect.Bridge", "src\DiamondDetect.Bridge\DiamondDetect.Bridge.csproj", "{0F093BE5-AA70-41D0-B88D-F617A4C334A3}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DiamondDetect.Wpf", "src\DiamondDetect.Wpf\DiamondDetect.Wpf.csproj", "{16A673C5-D379-4A11-B977-B71E954EFE71}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{E0A67C57-38DD-4796-85C7-32B2C4AAD60C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E0A67C57-38DD-4796-85C7-32B2C4AAD60C}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E0A67C57-38DD-4796-85C7-32B2C4AAD60C}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E0A67C57-38DD-4796-85C7-32B2C4AAD60C}.Release|Any CPU.Build.0 = Release|Any CPU
+		{0F093BE5-AA70-41D0-B88D-F617A4C334A3}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{0F093BE5-AA70-41D0-B88D-F617A4C334A3}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{0F093BE5-AA70-41D0-B88D-F617A4C334A3}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{0F093BE5-AA70-41D0-B88D-F617A4C334A3}.Release|Any CPU.Build.0 = Release|Any CPU
+		{16A673C5-D379-4A11-B977-B71E954EFE71}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{16A673C5-D379-4A11-B977-B71E954EFE71}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{16A673C5-D379-4A11-B977-B71E954EFE71}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{16A673C5-D379-4A11-B977-B71E954EFE71}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{E0A67C57-38DD-4796-85C7-32B2C4AAD60C} = {415E16D2-F8C9-477A-8832-1B8B2EEEDAD8}
+		{0F093BE5-AA70-41D0-B88D-F617A4C334A3} = {415E16D2-F8C9-477A-8832-1B8B2EEEDAD8}
+		{16A673C5-D379-4A11-B977-B71E954EFE71} = {415E16D2-F8C9-477A-8832-1B8B2EEEDAD8}
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {B5192B81-97BE-4550-987F-BE3D8EFE279C}
+	EndGlobalSection
+EndGlobal

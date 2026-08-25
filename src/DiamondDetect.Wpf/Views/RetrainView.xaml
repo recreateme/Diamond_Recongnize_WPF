@@ -1,0 +1,68 @@
+<UserControl x:Class="DiamondDetect.Wpf.Views.RetrainView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel>
+            <TextBlock Style="{StaticResource PageTitleStyle}" Text="模型再训练"/>
+            <TextBlock Style="{StaticResource PageHintStyle}"
+                       Text="调用 python_core/train.py。机台版默认只读；存在 corrections/ 时自动作为增量数据。"/>
+
+            <Border Background="#FFF8E1" BorderBrush="#FFE082" BorderThickness="1"
+                    CornerRadius="4" Padding="10,8" Margin="0,0,0,12">
+                <DockPanel>
+                    <Button DockPanel.Dock="Right" Content="{Binding UnlockButtonText}"
+                            Padding="12,4" Command="{Binding ToggleLockCommand}"/>
+                    <TextBlock Text="{Binding LockStatus}" VerticalAlignment="Center" Foreground="#F57F17"/>
+                </DockPanel>
+            </Border>
+
+            <GroupBox Header="数据统计" Padding="10" Margin="0,0,0,12">
+                <StackPanel>
+                    <TextBlock Text="{Binding StatsText}" TextWrapping="Wrap" Foreground="#455A64" FontSize="12"/>
+                    <Button Content="刷新统计" HorizontalAlignment="Left" Margin="0,8,0,0" Padding="12,4"
+                            Command="{Binding RefreshStatsCommand}"/>
+                </StackPanel>
+            </GroupBox>
+
+            <GroupBox Header="训练参数" Padding="10" Margin="0,0,0,12" IsEnabled="{Binding FormEnabled}">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="140"/>
+                        <ColumnDefinition Width="160"/>
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <TextBlock Text="图像尺寸 (px)" VerticalAlignment="Center"/>
+                    <TextBox Grid.Column="1" Text="{Binding ImgSize}" Margin="0,4"/>
+                    <TextBlock Grid.Row="1" Text="阶段一 Epochs" VerticalAlignment="Center"/>
+                    <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding EpochsPhase1}" Margin="0,4"/>
+                    <TextBlock Grid.Row="2" Text="阶段二 Epochs" VerticalAlignment="Center"/>
+                    <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding EpochsPhase2}" Margin="0,4"/>
+                    <TextBlock Grid.Row="3" Text="批大小" VerticalAlignment="Center"/>
+                    <TextBox Grid.Row="3" Grid.Column="1" Text="{Binding BatchSize}" Margin="0,4"/>
+                </Grid>
+            </GroupBox>
+
+            <GroupBox Header="训练日志" Padding="8" Margin="0,0,0,12">
+                <ListBox ItemsSource="{Binding LogLines}" Height="200"
+                         FontFamily="Consolas" FontSize="11"
+                         Background="#1E1E1E" Foreground="#A8D8A8" BorderThickness="0"/>
+            </GroupBox>
+
+            <DockPanel>
+                <Button Style="{StaticResource PrimaryButtonStyle}" Content="开始训练" Height="36"
+                        Command="{Binding StartTrainCommand}"
+                        IsEnabled="{Binding FormEnabled}"/>
+                <Button Content="停止" Width="80" Height="36" Margin="8,0,0,0"
+                        Command="{Binding StopTrainCommand}"
+                        IsEnabled="{Binding IsTraining}"/>
+                <Button Content="应用新模型" Height="36" HorizontalAlignment="Right"
+                        Background="#2E7D32" Foreground="White" Padding="16,0"
+                        Command="{Binding ApplyModelCommand}"
+                        IsEnabled="{Binding CanApply}"/>
+            </DockPanel>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

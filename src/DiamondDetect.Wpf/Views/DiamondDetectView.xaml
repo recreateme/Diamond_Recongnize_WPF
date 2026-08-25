@@ -1,0 +1,69 @@
+<UserControl x:Class="DiamondDetect.Wpf.Views.DiamondDetectView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <DockPanel>
+        <TextBlock DockPanel.Dock="Top" Style="{StaticResource PageTitleStyle}" Text="钻石检测分类"/>
+        <TextBlock DockPanel.Dock="Top" Style="{StaticResource PageHintStyle}"
+                   Text="大图 SAHI 切片检测 + 缺陷分类。切片参数在「设置 → 切片推理配置」中修改。"/>
+
+        <!-- 输入 -->
+        <GroupBox DockPanel.Dock="Top" Header="输入图像" Margin="0,0,0,10" Padding="10">
+            <DockPanel>
+                <StackPanel DockPanel.Dock="Right" Width="120" Margin="12,0,0,0">
+                    <Button Content="选择文件" Height="34" Margin="0,0,0,8" Command="{Binding BrowseFilesCommand}"/>
+                    <Button Content="选择文件夹" Height="34" Command="{Binding BrowseFolderCommand}"/>
+                </StackPanel>
+                <StackPanel>
+                    <TextBlock Text="{Binding InputPathText}" TextWrapping="Wrap" FontSize="15"
+                               FontWeight="SemiBold" Foreground="#37474F" MinHeight="48"/>
+                    <TextBlock Text="{Binding ImageCountText}" Foreground="#546E7A" FontSize="12" Margin="0,4,0,0"/>
+                </StackPanel>
+            </DockPanel>
+        </GroupBox>
+
+        <!-- 输出 -->
+        <GroupBox DockPanel.Dock="Top" Header="结果保存目录" Margin="0,0,0,10" Padding="10">
+            <DockPanel>
+                <Button DockPanel.Dock="Right" Content="选择目录" Width="96" Height="34" Margin="10,0,0,0"
+                        Command="{Binding BrowseOutputCommand}"/>
+                <TextBox Text="{Binding OutputDir, UpdateSourceTrigger=PropertyChanged}"
+                         VerticalContentAlignment="Center"/>
+            </DockPanel>
+        </GroupBox>
+
+        <!-- 控制 -->
+        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,8">
+            <Button Style="{StaticResource PrimaryButtonStyle}" Content="开始处理" Height="36"
+                    Command="{Binding RunCommand}"
+                    IsEnabled="{Binding IsRunning, Converter={StaticResource InvertBool}}"/>
+            <Button Content="停止" Width="80" Height="36" Margin="8,0,0,0"
+                    Command="{Binding StopCommand}" IsEnabled="{Binding IsRunning}"/>
+            <Button Content="打开结果目录" Height="36" Margin="8,0,0,0"
+                    Command="{Binding OpenOutputCommand}"/>
+        </DockPanel>
+
+        <ProgressBar DockPanel.Dock="Top" Height="22" Margin="0,0,0,6"
+                     Minimum="0" Maximum="{Binding ProgressMaximum}" Value="{Binding ProgressValue}"
+                     Visibility="{Binding ProgressVisible, Converter={StaticResource BoolToVis}}"/>
+        <TextBlock DockPanel.Dock="Top" Text="{Binding StageText}" Foreground="#546E7A" FontSize="12"
+                   TextWrapping="Wrap" Margin="0,0,0,8"
+                   Visibility="{Binding StageVisible, Converter={StaticResource BoolToVis}}"/>
+
+        <TextBlock DockPanel.Dock="Bottom" Text="{Binding TotalText}"
+                   Foreground="#1565C0" FontSize="16" FontWeight="Bold" Margin="0,8,0,0"/>
+
+        <GroupBox Header="结果统计" Padding="8">
+            <DataGrid ItemsSource="{Binding Rows}"
+                      Style="{StaticResource VirtualizedDataGridStyle}"
+                      IsReadOnly="True" RowHeight="28">
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="图像" Binding="{Binding Image}" Width="SizeToCells"/>
+                    <DataGridTextColumn Header="钻石数" Binding="{Binding DiamondsText}" Width="70"/>
+                    <DataGridTextColumn Header="缺陷类别分布" Binding="{Binding Distribution}" Width="*"/>
+                    <DataGridTextColumn Header="总耗时(s)" Binding="{Binding TimeText}" Width="90"/>
+                    <DataGridTextColumn Header="保存目录" Binding="{Binding OutputDir}" Width="SizeToCells"/>
+                </DataGrid.Columns>
+            </DataGrid>
+        </GroupBox>
+    </DockPanel>
+</UserControl>

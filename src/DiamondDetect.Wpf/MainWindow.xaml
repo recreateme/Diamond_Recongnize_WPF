@@ -1,0 +1,98 @@
+<Window x:Class="DiamondDetect.Wpf.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:views="clr-namespace:DiamondDetect.Wpf.Views"
+        Title="{Binding WindowTitle}"
+        Height="820" Width="1280"
+        MinHeight="640" MinWidth="1024"
+        Background="{StaticResource BgBrush}"
+        WindowStartupLocation="CenterScreen"
+        UseLayoutRounding="True"
+        SnapsToDevicePixels="True"
+        TextOptions.TextFormattingMode="Display"
+        TextOptions.TextRenderingMode="ClearType">
+    <Window.InputBindings>
+        <KeyBinding Key="D1" Modifiers="Control" Command="{Binding NavigateCommand}" CommandParameter="0"/>
+        <KeyBinding Key="D2" Modifiers="Control" Command="{Binding NavigateCommand}" CommandParameter="1"/>
+        <KeyBinding Key="D3" Modifiers="Control" Command="{Binding NavigateCommand}" CommandParameter="2"/>
+        <KeyBinding Key="D4" Modifiers="Control" Command="{Binding NavigateCommand}" CommandParameter="3"/>
+        <KeyBinding Key="D5" Modifiers="Control" Command="{Binding NavigateCommand}" CommandParameter="4"/>
+        <KeyBinding Key="D6" Modifiers="Control" Command="{Binding NavigateCommand}" CommandParameter="5"/>
+        <KeyBinding Key="Oem1" Modifiers="Control" Command="{Binding NavigateCommand}" CommandParameter="0"/>
+        <KeyBinding Key="F5" Command="{Binding RefreshCurrentCommand}"/>
+        <KeyBinding Key="Escape" Command="{Binding StopBusyCommand}"/>
+    </Window.InputBindings>
+    <DockPanel>
+        <StatusBar DockPanel.Dock="Bottom" Background="#ECEFF1" Padding="8,4">
+            <StatusBarItem>
+                <TextBlock Text="{Binding StatusText}" TextWrapping="NoWrap"/>
+            </StatusBarItem>
+            <StatusBarItem HorizontalAlignment="Right">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="{Binding EngineInfo}" Foreground="#455A64" Margin="0,0,12,0"/>
+                    <TextBlock Text="Ctrl+1…6 切换页 · Esc 停止 · F5 刷新" Foreground="#90A4AE" FontSize="11"/>
+                </StackPanel>
+            </StatusBarItem>
+        </StatusBar>
+
+        <Border DockPanel.Dock="Left" Width="200" Background="{StaticResource SidebarBrush}">
+            <DockPanel>
+                <StackPanel DockPanel.Dock="Top" Margin="16,20,16,12">
+                    <TextBlock Text="Diamond Detect" FontSize="16" FontWeight="Bold"
+                               Foreground="White"/>
+                    <TextBlock Text="WPF · 重构版" FontSize="11" Foreground="#90CAF9" Margin="0,4,0,0"/>
+                </StackPanel>
+                <StackPanel>
+                    <RadioButton Style="{StaticResource NavButtonStyle}" Content="钻石检测分类"
+                                 GroupName="Nav" IsChecked="True"
+                                 Command="{Binding NavigateCommand}" CommandParameter="0"
+                                 ToolTip="Ctrl+1"/>
+                    <RadioButton Style="{StaticResource NavButtonStyle}" Content="缺陷检测"
+                                 GroupName="Nav"
+                                 Command="{Binding NavigateCommand}" CommandParameter="1"
+                                 ToolTip="Ctrl+2"/>
+                    <RadioButton Style="{StaticResource NavButtonStyle}" Content="结果管理"
+                                 GroupName="Nav"
+                                 Command="{Binding NavigateCommand}" CommandParameter="2"
+                                 ToolTip="Ctrl+3"/>
+                    <RadioButton Style="{StaticResource NavButtonStyle}" Content="{Binding CorrectionNavText}"
+                                 GroupName="Nav"
+                                 Command="{Binding NavigateCommand}" CommandParameter="3"
+                                 ToolTip="Ctrl+4"/>
+                    <RadioButton Style="{StaticResource NavButtonStyle}" Content="模型再训练"
+                                 GroupName="Nav"
+                                 Command="{Binding NavigateCommand}" CommandParameter="4"
+                                 ToolTip="Ctrl+5"/>
+                    <RadioButton Style="{StaticResource NavButtonStyle}" Content="设置"
+                                 GroupName="Nav"
+                                 Command="{Binding NavigateCommand}" CommandParameter="5"
+                                 ToolTip="Ctrl+6"/>
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
+        <Grid Margin="20">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+            <ProgressBar Grid.Row="0" Height="3" IsIndeterminate="True" Margin="0,0,0,8"
+                         Visibility="{Binding IsBusy, Converter={StaticResource BoolToVis}}"/>
+            <TabControl Grid.Row="1" SelectedIndex="{Binding SelectedNavIndex}"
+                        BorderThickness="0" Background="Transparent"
+                        Padding="0">
+                <TabControl.ItemContainerStyle>
+                    <Style TargetType="TabItem">
+                        <Setter Property="Visibility" Value="Collapsed"/>
+                    </Style>
+                </TabControl.ItemContainerStyle>
+                <TabItem><views:DiamondDetectView x:Name="DiamondViewHost"/></TabItem>
+                <TabItem><views:DetectionView x:Name="DetectViewHost"/></TabItem>
+                <TabItem><views:ResultsView x:Name="ResultsViewHost"/></TabItem>
+                <TabItem><views:CorrectionView x:Name="CorrectionViewHost"/></TabItem>
+                <TabItem><views:RetrainView x:Name="RetrainViewHost"/></TabItem>
+                <TabItem><views:SettingsPage/></TabItem>
+            </TabControl>
+        </Grid>
+    </DockPanel>
+</Window>
