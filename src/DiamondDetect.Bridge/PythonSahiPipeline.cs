@@ -168,6 +168,9 @@ public sealed class PythonSahiPipeline : ISahiPipeline
         return s;
     }
 
+    /// <summary>与应用有效类别一致的固定列顺序（summary.csv 表头稳定）。</summary>
+    private static readonly string[] SummaryClassColumns = { "棱边朝上", "点朝上", "面朝上" };
+
     private static void WriteSummaryCsv(string outputDir, IReadOnlyList<SahiImageStats> allStats)
     {
         if (allStats.Count == 0) return;
@@ -175,18 +178,39 @@ public sealed class PythonSahiPipeline : ISahiPipeline
         {
             var csvPath = Path.Combine(outputDir, "summary.csv");
             var sb = new StringBuilder();
-            sb.AppendLine("图像,钻石数,缺陷类别分布,检测耗时(s),分类耗时(s),总耗时(s)");
+            sb.Append("图像,汇总钻石数,");
+            sb.Append(string.Join(",", SummaryClassColumns));
+            sb.AppendLine(",检测耗时(s),分类耗时(s),总耗时(s)");
+
+            var classTotals = new int[SummaryClassColumns.Length];
+            var diamondTotal = 0;
+
             foreach (var s in allStats)
             {
-                var dist = string.Join(" | ", s.DefectCounts.Select(kv => $"{kv.Key}:{kv.Value}"));
-                sb.Append(Csv(s.Image)).Append(',')
-                  .Append(s.TotalDiamonds).Append(',')
-                  .Append(Csv(dist)).Append(',')
+                diamondTotal += s.TotalDiamonds;
+                sb.Append(Csv(s.Image)).Append(',').Append(s.TotalDiamonds);
+                for (var i = 0; i < SummaryClassColumns.Length; i++)
+                {
+                    var n = s.DefectCounts.TryGetValue(SummaryClassColumns[i], out var c) ? c : 0;
+                    classTotals[i] += n;
+                    sb.Append(',').Append(n);
+                }
+                sb.Append(',')
                   .Append(s.DetectionTimeS.ToString("0.###", CultureInfo.InvariantCulture)).Append(',')
                   .Append(s.ClassificationTimeS.ToString("0.###", CultureInfo.InvariantCulture)).Append(',')
                   .Append(s.TotalTimeS.ToString("0.###", CultureInfo.InvariantCulture))
                   .AppendLine();
             }
+
+            // 多张图才追加一行批次合计；单张不写汇总行
+            if (allStats.Count > 1)
+            {
+                sb.Append(Csv("批次合计")).Append(',').Append(diamondTotal);
+                for (var i = 0; i < SummaryClassColumns.Length; i++)
+                    sb.Append(',').Append(classTotals[i]);
+                sb.AppendLine(",,,");
+            }
+
             File.WriteAllText(csvPath, sb.ToString(), new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
         }
         catch

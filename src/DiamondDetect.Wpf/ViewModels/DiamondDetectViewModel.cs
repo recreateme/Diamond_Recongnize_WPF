@@ -240,12 +240,8 @@ public partial class DiamondDetectViewModel : ObservableObject
         if (!string.IsNullOrEmpty(_inputFolder))
             InputPathText = Path.GetFullPath(_inputFolder);
         else
-        {
-            var parents = _imgPaths.Select(p => Path.GetDirectoryName(Path.GetFullPath(p))!).Distinct().ToList();
-            InputPathText = parents.Count == 1
-                ? parents[0]
-                : $"已选 {n} 个文件（多个来源文件夹）";
-        }
+            InputPathText = string.Join(Environment.NewLine,
+                _imgPaths.Select(p => Path.GetFullPath(p)));
         ImageCountText = $"共 {n} 张图像";
     }
 

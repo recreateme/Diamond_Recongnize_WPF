@@ -4,10 +4,10 @@
 |----|------|
 | 源项目 | `D:\Develop\defect_detect`（PyQt5 + Python ML） |
 | 目标项目 | `D:\Develop\diamond_detect_wpf`（WPF UI + 保留全部既有业务模块） |
-| 文档版本 | v1.1 |
-| 日期 | 2026-08-19 |
+| 文档版本 | v1.2 |
+| 日期 | 2026-08-25 |
 | 约束 | **现有业务/算法模块必须全部保留**；UI 层由 PyQt5 迁移为 WPF |
-| 进度 | **Phase 0–7 已落地**（功能页 + 打包 + 性能/高 DPI/体验）；后续为持续打磨 |
+| 进度 | **Phase 0–7 已落地**；2026-08 起应用层改为 **3 类**（排除局部破损/断钻）、取消阈值文件；详见 [docs/CONTRACTS.md](docs/CONTRACTS.md) |
 
 ---
 
@@ -15,18 +15,18 @@
 
 ### 1.1 现状摘要
 
-源项目是一套工业钻石缺陷 **五分类** 系统（EfficientNet-B0 + 主动学习闭环），核心能力包括：
+源项目是一套工业钻石缺陷分类系统（EfficientNet-B0 + 主动学习闭环；训练侧曾为五类）。**现行应用**对外三类，模型可仍输出五类 logits。核心能力包括：
 
 | 能力 | 实现 |
 |------|------|
 | 数据分析 | `analyze_image_sizes.py` |
-| 训练 / 微调 / ONNX 导出 / 阈值校准 | `train.py` |
+| 训练 / 微调 / ONNX 导出（训练可含阈值校准，应用侧忽略） | `train.py` |
 | 开发版分类推理（PyTorch GPU 优先） | `inference_engine.py` |
 | 机台版分类推理（ONNX Runtime） | `inference_engine_onnx.py` |
-| 推理公共逻辑（softmax、阈值、批量） | `inference_common.py` |
+| 推理公共逻辑（softmax、有效类 argmax、批量） | `inference_common.py` |
 | SAHI 大图切片检测 + 分类流水线 | `sahi_detector.py` |
 | 路径 / 冻结进程 / ORT DLL | `app_paths.py` |
-| PyQt5 桌面 UI（约 4200 行） | `app.py` |
+| PyQt5 桌面 UI（约 4200 行，已由 WPF 替代） | `app.py` |
 | 机台入口 | `app_deploy.py` |
 | 打包与验收 | `scripts/*`、`pyinstaller_hooks/*` |
 
@@ -104,18 +104,24 @@
 | `checkpoints/` 约定 | 不变 |
 | `requirements.txt` / `requirements-deploy.txt` | 保留 Python 依赖；去掉 PyQt5，改为“可选兼容/过渡期”说明 |
 
-### 2.4 五类缺陷与结果契约（不可破坏）
+### 2.4 缺陷类别与结果契约（现行约定）
 
-类别：`局部破损` / `断钻` / `棱边朝上` / `点朝上` / `面朝上`。
+> 历史目标曾为五类全量展示。自 2026-08 起**应用层**改为三类；模型权重可仍为 5 类输出。细节以 [docs/CONTRACTS.md](docs/CONTRACTS.md) 为准。
+
+| 项 | 约定 |
+|----|------|
+| 有效类 | `棱边朝上` / `点朝上` / `面朝上` |
+| 排除类 | `局部破损` / `断钻`（不参与最终判定与 UI 类别列表） |
+| 阈值文件 | 不使用 `class_thresholds.json` |
 
 检测结果 dict 字段须与现 UI/引擎一致：
 
 | 字段 | 含义 |
 |------|------|
 | `path` | 规范化图像路径（同路径 upsert） |
-| `class` / `confidence` | 阈值决策后的预测类及概率 |
-| `max_class` / `max_confidence` | argmax |
-| `all_scores` | 各类概率 |
+| `class` / `confidence` | 有效类 argmax 预测及概率 |
+| `max_class` / `max_confidence` | 与上相同 |
+| `all_scores` | 仅有效三类概率 |
 | `true_class` / `flagged` | 修正与待处理标记 |
 
 ---

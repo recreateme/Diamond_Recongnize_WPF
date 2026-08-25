@@ -7,8 +7,8 @@
 |----|------|
 | 项目根目录 | `D:\Develop\diamond_detect_wpf` |
 | 源参考仓 | `D:\Develop\defect_detect`（PyQt5 原版，算法同源） |
-| 文档版本 | v1.0 |
-| 日期 | 2026-08-19 |
+| 文档版本 | v1.1 |
+| 日期 | 2026-08-25 |
 
 ---
 
@@ -16,7 +16,7 @@
 
 本系统做三件事：
 
-1. **分类**：把钻石缺陷图分到五类（局部破损 / 断钻 / 棱边朝上 / 点朝上 / 面朝上）。
+1. **分类**：应用对外三类（棱边朝上 / 点朝上 / 面朝上）。模型权重仍按 5 类训练与导出；推理排除「局部破损」「断钻」后取有效类最高分。
 2. **大图检测**：对约 5120×5120 图做 SAHI 切片 + YOLO 检出，再对裁剪块分类。
 3. **主动学习**：机台误分类归档 → 开发机微调 → 更新模型回机台。
 
@@ -84,7 +84,7 @@
 |------|------|------|
 | 开发分类 | `python_core/inference_engine.py` | PyTorch GPU 优先 |
 | 机台分类 | `python_core/inference_engine_onnx.py` | ONNX Runtime |
-| 公共逻辑 | `python_core/inference_common.py` | softmax、阈值、批量结果结构 |
+| 公共逻辑 | `python_core/inference_common.py` | softmax、有效类别 argmax、批量结果结构 |
 | SAHI 流水线 | `python_core/sahi_detector.py` | 大图检测 + 分类 |
 | 训练 | `python_core/train.py` | 训练 / 微调 / 导出 ONNX |
 | 尺寸分析 | `python_core/analyze_image_sizes.py` | 推荐 `img_size` |
@@ -98,14 +98,14 @@
 | **pythonnet（主路径）** | WPF 进程内调用 Python 引擎 |
 | 本地 IPC（备选） | pythonnet 在机台不稳定时启用 |
 
-**规则**：阈值、softmax、批量决策 **只改** `inference_common.py`，禁止在 C# 复制一份。
+**规则**：softmax、有效类别决策、批量结果结构 **只改** `inference_common.py`，禁止在 C# 复制一份。已废弃逐类 `class_thresholds.json`。
 
 ### 3.4 配置与产物
 
 | 文件/目录 | 说明 |
 |-----------|------|
 | `app_config.json` | 模型路径、GPU、SAHI 参数（字段与原版兼容） |
-| `checkpoints/` | `best_model.pt`、`model.onnx`、`class_map.json`、`train_config.json`、`class_thresholds.json` |
+| `checkpoints/` | `best_model.pt`、`model.onnx`、`class_map.json`、`train_config.json`（**不再需要** `class_thresholds.json`） |
 | `detect_weights/best.pt` | YOLO 检测权重（机台） |
 | `corrections/` | 误分类归档（主动学习） |
 | `sahi_output/` | 大图流水线默认输出 |
@@ -328,10 +328,30 @@ checkpoints/model.onnx
 checkpoints/model.onnx.data   # 若有
 checkpoints/class_map.json
 checkpoints/train_config.json
-checkpoints/class_thresholds.json
 ```
 
+（应用不再读取 `class_thresholds.json`；打包清单亦已移除该文件。）
+
 重启应用（启动会自动加载）。更新检测：覆盖 `detect_weights/best.pt`。
+
+### 7.2.1 钻石检测 `summary.csv` 与补统计工具
+
+钻石检测分类批量输出根目录的 `summary.csv` 由 Bridge（`PythonSahiPipeline.WriteSummaryCsv`）写入，表头为：
+
+`图像,汇总钻石数,棱边朝上,点朝上,面朝上,检测耗时(s),分类耗时(s),总耗时(s)`
+
+- 多张图时末行：`批次合计`（汇总钻石数 = 各图钻石数之和；三列 = 各类合计）。
+- 仅单张时不写批次合计行。
+- 「选择文件」时输入区显示各文件完整路径；「选择文件夹」仍显示文件夹路径。
+
+若误删 `summary.csv`，可将工具放到结果根目录（如 `D:\迅雷下载\ECOA`）双击重建：
+
+```
+scripts/rebuild_summary_from_stats.py
+scripts/build_rebuild_summary_exe.bat   → 生成 dist_tools/rebuild_summary_from_stats.exe
+```
+
+扫描规则：结果根下一层子目录的 `*/statistics.json` → 写出同级 `summary.csv`（已有则备份为 `.bak`）。
 
 ### 7.3 主动学习闭环
 

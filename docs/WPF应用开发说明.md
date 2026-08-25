@@ -13,7 +13,7 @@ DiamondDetect.sln
 └── DiamondDetect.Bridge   # pythonnet、SAHI、TrainRunner
 ```
 
-原则：**UI 不写阈值/softmax；算法只改 python_core。**
+原则：**UI 不写 softmax / 有效类决策；算法只改 `python_core`（尤其 `inference_common.py`）。** 应用对外 3 类，见 [CONTRACTS.md](CONTRACTS.md)。
 
 ---
 
@@ -55,7 +55,7 @@ DiamondDetect.sln
 |------|------|
 | `PythonRuntimeHost` | 定位 Conda、`PYTHONHOME`、初始化 pythonnet、`sys.path` + `setup_ort_dll_paths` |
 | `PythonInferenceEngine` | `inference_engine` / `inference_engine_onnx` |
-| `PythonSahiPipeline` | `sahi_detector.SahiDetector` + `SahiPipeline` |
+| `PythonSahiPipeline` | `sahi_detector` 逐图处理；**C#** 写输出根目录 `summary.csv`（三类分列 + 多图「批次合计」） |
 | `ProcessTrainRunner` | 子进程 `train.py` |
 
 环境变量：
@@ -64,6 +64,7 @@ DiamondDetect.sln
 - `DEFECTS_DEPLOY=1` 机台
 - `DEFECTS_VERIFY=1` 或 `--verify` 无 GUI 验收
 
+分类决策在 Python `inference_common`（有效 3 类 argmax）；UI / 修正页类别列表来自 `IInferenceEngine.Classes`。
 ---
 
 ## 5. 新增功能页步骤
