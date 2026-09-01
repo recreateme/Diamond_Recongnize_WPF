@@ -45,17 +45,32 @@ public partial class DiamondDetectViewModel : ObservableObject
     }
 
     public ObservableCollection<SahiResultRow> Rows { get; } = new();
+    public IReadOnlyList<string> InterpolationOptions { get; } =
+        new[] { "area", "linear", "cubic", "nearest" };
 
+    [ObservableProperty] private string pageHintText =
+        "大图 SAHI 切片检测 + 缺陷分类。可选「仅检测定位」输出坐标 JSON/CSV；「输出选项」可保存可视化图。";
+    [ObservableProperty] private bool detectOnly;
+    [ObservableProperty] private bool saveVisualization;
+    [ObservableProperty] private bool downsampleEnabled = true;
+    [ObservableProperty] private int downsampleMaxSide = 2560;
+    [ObservableProperty] private string selectedInterpolation = "area";
     [ObservableProperty] private string inputPathText = "未选择图像";
     [ObservableProperty] private string imageCountText = "";
     [ObservableProperty] private string outputDir = "";
     [ObservableProperty] private bool isRunning;
+    [ObservableProperty] private bool isStopping;
     [ObservableProperty] private bool progressVisible;
     [ObservableProperty] private int progressValue;
     [ObservableProperty] private int progressMaximum = 1;
     [ObservableProperty] private string stageText = "";
     [ObservableProperty] private bool stageVisible;
     [ObservableProperty] private string totalText = "合计：0 张图 · 0 颗钻石";
+
+    public bool CanStop => IsRunning && !IsStopping;
+
+    partial void OnIsRunningChanged(bool value) => OnPropertyChanged(nameof(CanStop));
+    partial void OnIsStoppingChanged(bool value) => OnPropertyChanged(nameof(CanStop));
 
     [RelayCommand]
     private void BrowseFiles()
@@ -106,11 +121,16 @@ public partial class DiamondDetectViewModel : ObservableObject
             MessageBox.Show("请先选择输入图像。", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
-        if (!_engine.IsLoaded)
+        if (!DetectOnly && !_engine.IsLoaded)
         {
             MessageBox.Show(
-                "分类引擎未加载。请确认程序目录下存在：\ncheckpoints\\model.onnx\n以及 python_runtime（完整包）。\n\n可查看 logs\\startup.txt。",
+                "分类引擎未加载。请确认程序目录下存在：\ncheckpoints\\model.onnx\n以及 python_runtime（完整包）。\n\n可查看 logs\\startup.txt。\n\n若仅需定位坐标，请勾选「仅检测定位」。",
                 "引擎未就绪", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        if (DetectOnly && DownsampleEnabled && DownsampleMaxSide < 64)
+        {
+            MessageBox.Show("下采样目标边长至少为 64。", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
         if (string.IsNullOrWhiteSpace(OutputDir))
@@ -123,6 +143,7 @@ public partial class DiamondDetectViewModel : ObservableObject
         Rows.Clear();
         UpdateTotal();
         IsRunning = true;
+        IsStopping = false;
         _main.IsBusy = true;
         ProgressVisible = true;
         ProgressMaximum = Math.Max(1, _imgPaths.Count);
@@ -147,6 +168,13 @@ public partial class DiamondDetectViewModel : ObservableObject
             MaxAspectRatio = cfg.SahiMaxAspectRatio,
             EdgeFilter = cfg.SahiEdgeFilter,
             EdgeMarginPx = cfg.SahiEdgeMarginPx,
+            DetectOnly = DetectOnly,
+            DownsampleEnabled = DetectOnly && DownsampleEnabled,
+            DownsampleMaxSide = Math.Max(64, DownsampleMaxSide),
+            DownsampleInterpolation = string.IsNullOrWhiteSpace(SelectedInterpolation)
+                ? "area"
+                : SelectedInterpolation.Trim(),
+            SaveVisualization = SaveVisualization,
         };
 
         var progress = new Progress<SahiProgress>(p =>
@@ -158,24 +186,22 @@ public partial class DiamondDetectViewModel : ObservableObject
                 AppendRow(p.LastImage);
         });
 
+        var cancelled = false;
+        var errorMessage = "";
+        IReadOnlyList<SahiImageStats> stats = Array.Empty<SahiImageStats>();
         try
         {
             using var _ = LocalDiagnostics.Measure("sahi.run", $"n={_imgPaths.Count}");
-            var stats = await _sahi.ProcessImagesAsync(_imgPaths, options, progress, token);
-            StageText = token.IsCancellationRequested ? "已停止" : "处理完成";
-            _main.StatusText = $"钻石检测完成：{stats.Count} 张图";
-
-            if (stats.Count > 0 && !token.IsCancellationRequested)
-            {
-                var reply = MessageBox.Show(
-                    $"共处理 {stats.Count} 张图像。\n是否打开结果保存文件夹？",
-                    "处理完成", MessageBoxButton.YesNo, MessageBoxImage.Question);
-                if (reply == MessageBoxResult.Yes && Directory.Exists(OutputDir))
-                    Process.Start(new ProcessStartInfo { FileName = OutputDir, UseShellExecute = true });
-            }
+            stats = await _sahi.ProcessImagesAsync(_imgPaths, options, progress, token);
+            cancelled = token.IsCancellationRequested;
+            StageText = cancelled ? "已停止" : "处理完成";
+            _main.StatusText = DetectOnly
+                ? $"钻石定位完成：{stats.Count} 张图"
+                : $"钻石检测完成：{stats.Count} 张图";
         }
         catch (OperationCanceledException)
         {
+            cancelled = true;
             StageText = "已停止";
             _main.StatusText = "钻石检测已停止";
             LocalDiagnostics.Event("sahi.run.cancelled");
@@ -183,12 +209,13 @@ public partial class DiamondDetectViewModel : ObservableObject
         catch (Exception ex)
         {
             LocalDiagnostics.Error("sahi.run", ex);
-            MessageBox.Show(UserMessage.Format(ex), "处理出错", MessageBoxButton.OK, MessageBoxImage.Error);
+            errorMessage = UserMessage.Format(ex);
             StageText = "出错";
         }
         finally
         {
             IsRunning = false;
+            IsStopping = false;
             ProgressVisible = false;
             StageVisible = false;
             _main.IsBusy = false;
@@ -196,10 +223,32 @@ public partial class DiamondDetectViewModel : ObservableObject
             _cts = null;
             UpdateTotal();
         }
+
+        if (!string.IsNullOrEmpty(errorMessage))
+            MessageBox.Show(errorMessage, "处理出错", MessageBoxButton.OK, MessageBoxImage.Error);
+
+        // 完整模式：单张/多图/文件夹批量均写出 summary.csv（与历史表头一致）
+        if (!DetectOnly && stats.Count > 0 && !string.IsNullOrWhiteSpace(OutputDir))
+            SahiSummaryCsv.Write(OutputDir, stats);
+
+        if (stats.Count > 0 && !cancelled)
+        {
+            var reply = MessageBox.Show(
+                $"共处理 {stats.Count} 张图像。\n是否打开结果保存文件夹？",
+                "处理完成", MessageBoxButton.YesNo, MessageBoxImage.Question);
+            if (reply == MessageBoxResult.Yes && Directory.Exists(OutputDir))
+                Process.Start(new ProcessStartInfo { FileName = OutputDir, UseShellExecute = true });
+        }
     }
 
     [RelayCommand]
-    private void Stop() => _cts?.Cancel();
+    private void Stop()
+    {
+        if (!IsRunning || IsStopping || _cts is null) return;
+        IsStopping = true;
+        StageText = "正在停止…";
+        _cts.Cancel();
+    }
 
     [RelayCommand]
     private void OpenOutput()

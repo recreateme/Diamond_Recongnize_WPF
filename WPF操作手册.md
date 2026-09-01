@@ -7,8 +7,8 @@
 |----|------|
 | 项目根目录 | `D:\Develop\diamond_detect_wpf` |
 | 源参考仓 | `D:\Develop\defect_detect`（PyQt5 原版，算法同源） |
-| 文档版本 | v1.1 |
-| 日期 | 2026-08-25 |
+| 文档版本 | v1.2 |
+| 日期 | 2026-09-01 |
 
 ---
 
@@ -334,24 +334,44 @@ checkpoints/train_config.json
 
 重启应用（启动会自动加载）。更新检测：覆盖 `detect_weights/best.pt`。
 
-### 7.2.1 钻石检测 `summary.csv` 与补统计工具
+### 7.2.1 钻石检测输出与 `summary.csv`
 
-钻石检测分类批量输出根目录的 `summary.csv` 由 Bridge（`PythonSahiPipeline.WriteSummaryCsv`）写入，表头为：
+#### 处理模式
+
+| 模式 | 说明 |
+|------|------|
+| **检测+分类**（默认） | SAHI + YOLO + ONNX 三分类；产线推荐 **5120×5120 原图** |
+| **仅检测定位** | 不加载分类模型；输出坐标 JSON/CSV；可选下采样加速（研发测速用） |
+
+#### 每图子目录（`{输出根}/{stem}/` 或 `{stem}_无目标/`）
+
+| 文件 | 完整模式 | 仅检测 |
+|------|----------|--------|
+| `detect_boxes.json` / `.csv` | ✓（含 `defect_class`、`defect_conf`） | ✓（仅坐标） |
+| `visualization_classified.jpg` | 勾选「保存可视化」且有目标 | — |
+| `visualization_detection.jpg` | — | 勾选「保存可视化」且有目标 |
+| `{stem}_detect_input.jpg` | — | 下采样时 |
+
+不再生成：`crops/`、`result.json`、`statistics.json`。
+
+#### `summary.csv`（仅完整模式）
+
+由 `SahiSummaryCsv` 写入输出根目录，表头：
 
 `图像,汇总钻石数,棱边朝上,点朝上,面朝上,检测耗时(s),分类耗时(s),总耗时(s)`
 
-- 多张图时末行：`批次合计`（汇总钻石数 = 各图钻石数之和；三列 = 各类合计）。
-- 仅单张时不写批次合计行。
-- 「选择文件」时输入区显示各文件完整路径；「选择文件夹」仍显示文件夹路径。
+- 单张 / 多选文件 / 文件夹批量均会写出。
+- 多张时末行 `批次合计`；单张无合计行。
+- 误删后重新跑一遍完整模式即可恢复。
 
-若误删 `summary.csv`，可将工具放到结果根目录（如 `D:\迅雷下载\ECOA`）双击重建：
+低分辨率/压缩图漏检分析见 [docs/钻石检测低分辨率漏检优化方案.md](docs/钻石检测低分辨率漏检优化方案.md)。
 
-```
-scripts/rebuild_summary_from_stats.py
-scripts/build_rebuild_summary_exe.bat   → 生成 dist_tools/rebuild_summary_from_stats.exe
-```
+### 7.2.2 钻石检测页交互（2026-09）
 
-扫描规则：结果根下一层子目录的 `*/statistics.json` → 写出同级 `summary.csv`（已有则备份为 `.bak`）。
+- 输入区：「选择文件」「选择文件夹」横排；路径完整显示。
+- 输出选项：「保存可视化结果」（默认不勾）。
+- 停止：协作式取消（SAHI 切片批次间响应）；点击后显示「正在停止…」。
+- 完成后先复位进度与按钮，再弹「是否打开结果文件夹」。
 
 ### 7.3 主动学习闭环
 

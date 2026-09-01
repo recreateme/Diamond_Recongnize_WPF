@@ -39,7 +39,7 @@ WPF 与 `python_core` 必须遵守下列契约，变更时同步更新本文件�
 
 ## 钻石检测 `summary.csv`
 
-由 `DiamondDetect.Bridge.PythonSahiPipeline.WriteSummaryCsv` 写入输出根目录。
+由 `DiamondDetect.Core.Services.SahiSummaryCsv` 写入输出根目录（Bridge 与 ViewModel 在完整模式结束时均会调用，保证单张/多图/文件夹批量一致）。
 
 | 列 | 说明 |
 |----|------|
@@ -48,9 +48,22 @@ WPF 与 `python_core` 必须遵守下列契约，变更时同步更新本文件�
 | 棱边朝上 / 点朝上 / 面朝上 | 该图（或批次）各类数量，缺省 0 |
 | 检测耗时(s) / 分类耗时(s) / 总耗时(s) | 单图耗时；汇总行留空 |
 
+- **仅「检测+分类」完整模式**写入；「仅检测定位」不写（无分类统计）。
 - **仅处理图像数 > 1** 时追加一行 `批次合计`。
 - 单张不写汇总行。
-- 补回误删：`scripts/rebuild_summary_from_stats.py`（或打包 exe）扫描 `*/statistics.json` 重建同格式 CSV。
+
+## 钻石检测每图输出目录
+
+每张图在输出根目录下对应子文件夹 `{stem}/`；**0 目标**时为 `{stem}_无目标/`。
+
+| 文件 | 说明 |
+|------|------|
+| `detect_boxes.json` / `detect_boxes.csv` | 检测框坐标（与检测用图同分辨率）；完整模式含 `defect_class`、`defect_conf` 列 |
+| `visualization_classified.jpg` | 完整模式且勾选「保存可视化」且有目标时 |
+| `visualization_detection.jpg` | 仅检测模式且勾选「保存可视化」且有目标时 |
+| `{stem}_detect_input.jpg` | 仅检测且发生下采样时 |
+
+不再生成：`crops/`、`result.json`、`statistics.json`、`visualization_detection.jpg`（完整模式）。
 
 ## 环境变量
 

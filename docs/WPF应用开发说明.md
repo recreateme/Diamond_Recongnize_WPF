@@ -55,7 +55,8 @@ DiamondDetect.sln
 |------|------|
 | `PythonRuntimeHost` | 定位 Conda、`PYTHONHOME`、初始化 pythonnet、`sys.path` + `setup_ort_dll_paths` |
 | `PythonInferenceEngine` | `inference_engine` / `inference_engine_onnx` |
-| `PythonSahiPipeline` | `sahi_detector` 逐图处理；**C#** 写输出根目录 `summary.csv`（三类分列 + 多图「批次合计」） |
+| `PythonSahiPipeline` | `sahi_detector` 逐图处理；`should_stop` 协作取消；完整模式写 `summary.csv`（`SahiSummaryCsv`） |
+| `CancellationBridge` | 将 `CancellationToken` 暴露为 Python `should_stop()` |
 | `ProcessTrainRunner` | 子进程 `train.py` |
 
 环境变量：

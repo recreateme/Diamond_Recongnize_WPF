@@ -4,7 +4,7 @@
   "data_dir": "data",
   "corrections_dir": "corrections",
   "use_gpu": true,
-  "yolo_path": "D:/工作记录/3-AI应用课题/张旭/data_process/model_weights/best.pt",
+  "yolo_path": "detect_weights/best.pt",
   "sahi_device": "auto",
   "sahi_slice_size": 1280,
   "sahi_overlap": 0.2,

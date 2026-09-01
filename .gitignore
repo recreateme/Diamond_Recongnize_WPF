@@ -8,6 +8,12 @@
 ## Publish / package
 /dist/
 /_wpf_publish/
+/dist_tools/build/
+/dist_tools/*.exe
+
+## IDE
+scripts/.idea/
+**/.idea/
 
 ## Python
 **/__pycache__/
@@ -27,3 +33,4 @@
 ## Local secrets / machine paths — keep example only if needed
 # app_config.json may contain absolute yolo paths; review before commit
 # Prefer committing app_config.deploy.json as the machine template
+/detect_weights/*.pt

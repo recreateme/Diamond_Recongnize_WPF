@@ -8,7 +8,7 @@ Slicing Aided Hyper Inference (SAHI) 大图检测 + 缺陷分类流水线
   1. 切片目标检测（滑动窗口 → YOLO 批量推理）
   2. 后处理链：iou_nms → IoS 包含抑制 → 面积/长宽比过滤 → 边缘剔除
   3. 裁剪每个检测目标 → 缺陷分类引擎批量分类
-  4. 保存裁剪图、可视化图、JSON 结果与统计信息
+  4. 写出 detect_boxes.json/csv；可选可视化 JPEG
 
 设计参考: data_process/pipeline/phase3_inference.py（产品级 24×24 网格推理）
 本模块针对**单张大图**简化：无需网格坐标、跨图 NMS。
@@ -37,6 +37,15 @@ from typing import Any, Dict, List, NamedTuple, Optional, Tuple, Callable
 from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
+
+
+class PipelineCancelledError(Exception):
+    """协作式取消（WPF CancellationToken / should_stop 回调）。"""
+
+
+def _check_stop(should_stop: Optional[Callable[[], bool]]) -> None:
+    if should_stop and should_stop():
+        raise PipelineCancelledError()
 
 
 # ════════════════════════════════════════════════════════════════════════
@@ -591,7 +600,11 @@ class SahiDetector:
     def is_loaded(self) -> bool:
         return self._loaded
 
-    def detect(self, img: np.ndarray) -> List[Detection]:
+    def detect(
+        self,
+        img: np.ndarray,
+        should_stop: Optional[Callable[[], bool]] = None,
+    ) -> List[Detection]:
         """
         对单张大图执行 SAHI 切片检测 + 后处理。
 
@@ -614,6 +627,7 @@ class SahiDetector:
         # ── 分批推理 ──────────────────────────────────────────────
         raw: List[Detection] = []
         for i in range(0, len(tiles), self.batch_size):
+            _check_stop(should_stop)
             batch_tiles  = tiles[i: i + self.batch_size]
             batch_coords = coords[i: i + self.batch_size]
             batch_results = self._infer_batch(batch_tiles)
@@ -892,29 +906,32 @@ def draw_classified_detections(img: np.ndarray, dets: List[Detection]) -> np.nda
     return cv2.cvtColor(np.asarray(pil), cv2.COLOR_RGB2BGR)
 
 
-def save_visualizations(
+def save_detection_visualization(
     out_dir: Path,
     img: np.ndarray,
     dets: List[Detection],
     *,
     jpeg_quality: int = 95,
-) -> Tuple[str, str]:
-    """
-    保存两张与原图同分辨率的 JPEG 可视化图。
+) -> str:
+    """保存检测框可视化（绿框，与检测用图同分辨率）。"""
+    path = out_dir / VIS_DETECTION_NAME
+    vis = draw_detection_boxes(img, dets)
+    cv2.imwrite(str(path), vis, [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality])
+    return str(path)
 
-    Returns:
-        (检测框图路径, 分类着色图路径)
-    """
-    det_path = out_dir / VIS_DETECTION_NAME
-    cls_path = out_dir / VIS_CLASSIFIED_NAME
-    encode = [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality]
 
-    vis_det = draw_detection_boxes(img, dets)
-    vis_cls = draw_classified_detections(img, dets) if dets else img.copy()
-
-    cv2.imwrite(str(det_path), vis_det, encode)
-    cv2.imwrite(str(cls_path), vis_cls, encode)
-    return str(det_path), str(cls_path)
+def save_classified_visualization(
+    out_dir: Path,
+    img: np.ndarray,
+    dets: List[Detection],
+    *,
+    jpeg_quality: int = 95,
+) -> str:
+    """保存分类着色可视化（与底图同分辨率）。"""
+    path = out_dir / VIS_CLASSIFIED_NAME
+    vis = draw_classified_detections(img, dets) if dets else img.copy()
+    cv2.imwrite(str(path), vis, [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality])
+    return str(path)
 
 
 # ════════════════════════════════════════════════════════════════════════
@@ -927,17 +944,10 @@ class SahiPipeline:
 
     流程 (process_image):
       1. 读取大图 → SahiDetector.detect() → 检测框列表
-      2. 裁剪每个检测目标 → 保存到 crops/ 目录
-      3. InferenceEngine.predict_batch() 批量分类所有裁剪图
-      4. 绘制两张全分辨率可视化图（检测框 / 分类着色）→ 保存 JPEG
-      5. 保存 result.json + statistics.json
-      6. 返回统计字典
-
-    Args:
-        detector:    SahiDetector 实例（须已 load）
-        classifier:  InferenceEngine 实例（须已 load）
-        output_dir:  输出根目录
-        crop_padding: 裁剪时四周扩展像素数
+      2. 内存裁剪 → InferenceEngine 批量分类
+      3. 写出 detect_boxes.json/csv（含分类列）
+      4. 可选写出 visualization_classified.jpg
+      5. 返回统计字典（summary.csv 由 WPF Bridge 写入）
     """
 
     def __init__(
@@ -946,11 +956,13 @@ class SahiPipeline:
         classifier: Any,
         output_dir: str,
         crop_padding: int = 15,
+        save_visualization: bool = False,
     ):
         self.detector = detector
         self.classifier = classifier
         self.output_dir = Path(output_dir)
         self.crop_padding = crop_padding
+        self.save_visualization = bool(save_visualization)
 
     def process_image(
         self,
@@ -983,12 +995,9 @@ class SahiPipeline:
 
         path = Path(img_path)
         stem = path.stem
-        img_out_dir = self.output_dir / stem
-        crops_dir = img_out_dir / "crops"
-        crops_dir.mkdir(parents=True, exist_ok=True)
 
         if should_stop and should_stop():
-            return self._empty_stats(stem)
+            raise PipelineCancelledError()
 
         # ── 1. 读取大图 ──────────────────────────────────────────
         _stage(f"读取 {path.name}", 0)
@@ -998,13 +1007,14 @@ class SahiPipeline:
             raise IOError(f"无法读取图像: {path}")
         H, W = img.shape[:2]
         _log(f"图像尺寸: {W}×{H}")
+        detect_size = {"width": W, "height": H}
 
         # ── 2. SAHI 检测 ──────────────────────────────────────────
         _stage(f"检测 {path.name}", 1)
         t0 = time.time()
         _log(f"SAHI 检测: 切片 {self.detector.slice_size}px, "
              f"重叠 {self.detector.overlap_ratio:.0%}, 置信度 {self.detector.conf}")
-        dets = self.detector.detect(img)
+        dets = self.detector.detect(img, should_stop=should_stop)
         det_time = time.time() - t0
         skip_stats = dict(self.detector.last_skip_stats)
         skipped_total = sum(skip_stats.values())
@@ -1017,22 +1027,30 @@ class SahiPipeline:
             )
         _log(f"检测完成: 保留 {len(dets)} 个目标（剔除 {skipped_total}）, 耗时 {det_time:.2f}s")
 
+        img_out_dir = image_output_dir(self.output_dir, stem, len(dets))
+        img_out_dir.mkdir(parents=True, exist_ok=True)
+
         if not dets:
             _log("未检测到任何目标")
-            self._save_results(img_out_dir, stem, [], img, det_time, 0.0, skip_stats)
+            json_path, csv_path = write_detect_boxes_files(
+                img_out_dir, f"{stem}.jpg", detect_size, [],
+                with_classification=True,
+            )
+            _log(f"坐标已保存: {json_path.name}, {csv_path.name}")
             _stage(f"完成 {path.name}", 4)
-            return self._stats(stem, [], det_time, 0.0, str(img_out_dir), skip_stats)
+            return self._stats(
+                stem, [], det_time, 0.0, str(img_out_dir), skip_stats,
+                boxes_json=str(json_path), boxes_csv=str(csv_path),
+            )
 
-        if should_stop and should_stop():
-            return self._empty_stats(stem)
+        _check_stop(should_stop)
 
         # ── 3. 裁剪（内存）──────────────────────────────────────
         _stage(f"裁剪 {len(dets)} 个目标", 2)
-        _log(f"裁剪 {len(dets)} 个目标（内存分类，写盘一次）...")
+        _log(f"裁剪 {len(dets)} 个目标（内存分类）...")
         crop_bgr: List[np.ndarray] = []
         for d in dets:
-            if should_stop and should_stop():
-                return self._empty_stats(stem)
+            _check_stop(should_stop)
             crop_bgr.append(
                 crop_with_padding(img, d.x1, d.y1, d.x2, d.y2, self.crop_padding)
             )
@@ -1066,16 +1084,21 @@ class SahiPipeline:
                 should_stop=should_stop,
             )
         else:
-            crop_paths: List[str] = []
-            for i, crop in enumerate(crop_bgr):
-                crop_path = str(crops_dir / f"{i + 1:04d}.jpg")
-                cv2.imwrite(crop_path, crop, [cv2.IMWRITE_JPEG_QUALITY, 92])
-                crop_paths.append(crop_path)
-                dets[i].crop_path = crop_path
-            _log(f"批量分类 {len(crop_paths)} 个裁剪图（磁盘回退）...")
-            cls_results = self.classifier.predict_batch(
-                crop_paths, should_stop=should_stop,
-            )
+            import shutil
+            import tempfile
+            tmp_dir = Path(tempfile.mkdtemp(prefix="sahi_crop_"))
+            try:
+                crop_paths: List[str] = []
+                for i, crop in enumerate(crop_bgr):
+                    crop_path = str(tmp_dir / f"{i + 1:04d}.jpg")
+                    cv2.imwrite(crop_path, crop, [cv2.IMWRITE_JPEG_QUALITY, 92])
+                    crop_paths.append(crop_path)
+                _log(f"批量分类 {len(crop_paths)} 个裁剪图（临时磁盘回退）...")
+                cls_results = self.classifier.predict_batch(
+                    crop_paths, should_stop=should_stop,
+                )
+            finally:
+                shutil.rmtree(tmp_dir, ignore_errors=True)
         cls_time = time.time() - t1
 
         if len(cls_results) != len(dets):
@@ -1086,23 +1109,23 @@ class SahiPipeline:
         for d, r in zip(dets, cls_results):
             d.apply_classifier_result(r, known_classes=known_classes)
 
-        # 写盘一次：文件名用预测类别（与可视化一致）
+        # ── 5. 写出坐标 + 可选可视化 ─────────────────────────────
         _stage(f"保存 {path.name}", 4)
-        for i, (d, crop) in enumerate(zip(dets, crop_bgr)):
-            vis_cls = d.display_class
-            if vis_cls and vis_cls != "ERROR":
-                name = f"{i + 1:04d}_{vis_cls}.jpg"
-            else:
-                name = f"{i + 1:04d}.jpg"
-            crop_path = str(crops_dir / name)
-            cv2.imwrite(crop_path, crop, [cv2.IMWRITE_JPEG_QUALITY, 92])
-            d.crop_path = crop_path
+        boxes = detections_to_opencv_boxes(dets, with_classification=True)
+        json_path, csv_path = write_detect_boxes_files(
+            img_out_dir, f"{stem}.jpg", detect_size, boxes,
+            with_classification=True,
+        )
+        _log(f"坐标已保存: {json_path.name}, {csv_path.name}")
 
-        # ── 5. 可视化 + 保存结果 ──────────────────────────────────
-        _log("生成可视化与统计...")
-        self._save_results(img_out_dir, stem, dets, img, det_time, cls_time, skip_stats)
+        if self.save_visualization:
+            vis_path = save_classified_visualization(img_out_dir, img, dets)
+            _log(f"可视化已保存: {Path(vis_path).name}")
 
-        stats = self._stats(stem, dets, det_time, cls_time, str(img_out_dir), skip_stats)
+        stats = self._stats(
+            stem, dets, det_time, cls_time, str(img_out_dir), skip_stats,
+            boxes_json=str(json_path), boxes_csv=str(csv_path),
+        )
         _log(f"统计: 钻石 {stats['total_diamonds']} 个 | "
              + " | ".join(f"{k}:{v}" for k, v in stats["defect_counts"].items())
              + f" | 总耗时 {stats['total_time_s']:.2f}s")
@@ -1146,37 +1169,6 @@ class SahiPipeline:
 
     # ── 内部方法 ──────────────────────────────────────────────────
 
-    def _save_results(
-        self,
-        out_dir: Path,
-        stem: str,
-        dets: List[Detection],
-        img: np.ndarray,
-        det_time: float,
-        cls_time: float,
-        skip_stats: Optional[Dict[str, int]] = None,
-    ) -> None:
-        """保存 result.json、statistics.json、两张全分辨率可视化图。"""
-        det_vis, cls_vis = save_visualizations(out_dir, img, dets)
-
-        result = {
-            "image": f"{stem}.jpg",
-            "image_size": {"width": img.shape[1], "height": img.shape[0]},
-            "detection_time_s": round(det_time, 3),
-            "classification_time_s": round(cls_time, 3),
-            "total_detections": len(dets),
-            "postprocess_skipped": dict(skip_stats or {}),
-            "visualization_detection": det_vis,
-            "visualization_classified": cls_vis,
-            "detections": [d.to_dict() for d in dets],
-        }
-        with open(out_dir / "result.json", "w", encoding="utf-8") as f:
-            json.dump(result, f, ensure_ascii=False, indent=2)
-
-        stats = self._stats(stem, dets, det_time, cls_time, str(out_dir), skip_stats)
-        with open(out_dir / "statistics.json", "w", encoding="utf-8") as f:
-            json.dump(stats, f, ensure_ascii=False, indent=2)
-
     def _stats(
         self,
         stem: str,
@@ -1185,6 +1177,9 @@ class SahiPipeline:
         cls_time: float,
         out_dir: str,
         skip_stats: Optional[Dict[str, int]] = None,
+        *,
+        boxes_json: str = "",
+        boxes_csv: str = "",
     ) -> dict:
         """构建统计字典（类别计数按可视化用的最高分类别）。"""
         defect_counts: Dict[str, int] = {}
@@ -1204,6 +1199,8 @@ class SahiPipeline:
             "classification_time_s": round(cls_time, 3),
             "total_time_s": round(det_time + cls_time, 3),
             "output_dir": out_dir,
+            "boxes_json": boxes_json,
+            "boxes_csv": boxes_csv,
         }
 
     def _empty_stats(self, stem: str) -> dict:
@@ -1247,6 +1244,275 @@ class SahiPipeline:
                     s.get("total_time_s", 0),
                 ])
         logger.info(f"汇总 CSV: {csv_path}")
+
+
+# ════════════════════════════════════════════════════════════════════════
+# 仅检测定位（detect-only）— 可选下采样 + 坐标 JSON/CSV
+# ════════════════════════════════════════════════════════════════════════
+
+INTERPOLATION_METHODS: Dict[str, int] = {
+    "area": cv2.INTER_AREA,
+    "linear": cv2.INTER_LINEAR,
+    "cubic": cv2.INTER_CUBIC,
+    "nearest": cv2.INTER_NEAREST,
+}
+
+
+def resolve_interpolation(name: str) -> int:
+    key = (name or "area").strip().lower()
+    return INTERPOLATION_METHODS.get(key, cv2.INTER_AREA)
+
+
+def maybe_downsample_image(
+    img: np.ndarray,
+    *,
+    enabled: bool,
+    max_side: int,
+    interpolation: str = "area",
+) -> Tuple[np.ndarray, bool, Dict[str, int]]:
+    """
+  若启用且 max(H,W) > max_side，则等比缩放到最长边 = max_side。
+  返回 (用于检测的图像, 是否发生缩放, detect_input_size dict)。
+    """
+    H, W = img.shape[:2]
+    size_info = {"width": W, "height": H}
+    if not enabled or max_side <= 0:
+        return img, False, size_info
+    longest = max(H, W)
+    if longest <= max_side:
+        return img, False, size_info
+    scale = max_side / float(longest)
+    new_w = max(1, int(round(W * scale)))
+    new_h = max(1, int(round(H * scale)))
+    interp = resolve_interpolation(interpolation)
+    resized = cv2.resize(img, (new_w, new_h), interpolation=interp)
+    return resized, True, {"width": new_w, "height": new_h}
+
+
+NO_DETECTION_DIR_SUFFIX = "_无目标"
+
+
+def image_output_dir(output_root: Path, stem: str, detection_count: int) -> Path:
+    """有目标用 stem；0 目标用 stem_无目标。"""
+    name = stem if detection_count > 0 else f"{stem}{NO_DETECTION_DIR_SUFFIX}"
+    return output_root / name
+
+
+def detections_to_opencv_boxes(
+    dets: List[Detection],
+    *,
+    with_classification: bool = False,
+) -> List[Dict[str, object]]:
+    boxes: List[Dict[str, object]] = []
+    for i, d in enumerate(dets, start=1):
+        box: Dict[str, object] = {
+            "id": i,
+            "x1": int(d.x1),
+            "y1": int(d.y1),
+            "x2": int(d.x2),
+            "y2": int(d.y2),
+        }
+        if with_classification:
+            box["defect_class"] = d.display_class or ""
+            box["defect_conf"] = round(float(d.display_conf), 4) if d.display_class else 0.0
+        boxes.append(box)
+    return boxes
+
+
+def write_detect_boxes_files(
+    out_dir: Path,
+    image_name: str,
+    detect_size: Dict[str, int],
+    boxes: List[Dict[str, object]],
+    *,
+    with_classification: bool = False,
+) -> Tuple[Path, Path]:
+    """写出 detect_boxes.json / detect_boxes.csv（OpenCV 绝对坐标，int）。"""
+    import csv
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    json_path = out_dir / "detect_boxes.json"
+    csv_path = out_dir / "detect_boxes.csv"
+
+    payload = {
+        "image": image_name,
+        "count": len(boxes),
+        "detect_input_size": detect_size,
+        "coordinate_system": "opencv_abs_xyxy",
+        "note": "x1,y1,x2,y2 are int(); origin top-left; coords match image used for detection",
+        "boxes": boxes,
+    }
+    with open(json_path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+
+    if with_classification:
+        header = ["id", "x1", "y1", "x2", "y2", "defect_class", "defect_conf"]
+    else:
+        header = ["id", "x1", "y1", "x2", "y2"]
+
+    with open(csv_path, "w", newline="", encoding="utf-8-sig") as f:
+        writer = csv.writer(f)
+        writer.writerow(header)
+        for b in boxes:
+            if with_classification:
+                writer.writerow([
+                    b["id"], b["x1"], b["y1"], b["x2"], b["y2"],
+                    b.get("defect_class", ""), b.get("defect_conf", ""),
+                ])
+            else:
+                writer.writerow([b["id"], b["x1"], b["y1"], b["x2"], b["y2"]])
+
+    return json_path, csv_path
+
+
+class SahiDetectOnlyPipeline:
+    """
+    SAHI 仅检测定位：可选下采样 → YOLO 检测 → 坐标 JSON/CSV。
+
+    不加载缺陷分类模型。坐标系为**实际用于检测的图像**（下采样后则为下采样图上的绝对坐标）。
+    可选写出 visualization_detection.jpg（与检测用图同分辨率；0 目标时不写）。
+    """
+
+    def __init__(
+        self,
+        detector: SahiDetector,
+        output_dir: str,
+        *,
+        downsample_enabled: bool = False,
+        downsample_max_side: int = 2560,
+        downsample_interpolation: str = "area",
+        save_visualization: bool = False,
+    ):
+        self.detector = detector
+        self.output_dir = Path(output_dir)
+        self.downsample_enabled = bool(downsample_enabled)
+        self.downsample_max_side = int(downsample_max_side)
+        self.downsample_interpolation = downsample_interpolation or "area"
+        self.save_visualization = bool(save_visualization)
+
+    def process_image(
+        self,
+        img_path: str,
+        log_cb: Optional[Callable[[str], None]] = None,
+        should_stop: Optional[Callable[[], bool]] = None,
+        stage_cb: Optional[Callable[[str], None]] = None,
+    ) -> dict:
+        def _log(msg: str) -> None:
+            if log_cb:
+                log_cb(msg)
+            else:
+                logger.info(msg)
+
+        def _stage(msg: str) -> None:
+            if stage_cb:
+                stage_cb(msg)
+
+        path = Path(img_path)
+        stem = path.stem
+
+        if should_stop and should_stop():
+            raise PipelineCancelledError()
+
+        _stage(f"读取 {path.name}")
+        _log(f"读取图像: {path.name}")
+        src = cv2.imread(str(path))
+        if src is None:
+            raise IOError(f"无法读取图像: {path}")
+        src_h, src_w = src.shape[:2]
+        _log(f"源图尺寸: {src_w}×{src_h}")
+
+        detect_img, did_resize, detect_size = maybe_downsample_image(
+            src,
+            enabled=self.downsample_enabled,
+            max_side=self.downsample_max_side,
+            interpolation=self.downsample_interpolation,
+        )
+        if did_resize:
+            _log(
+                f"将下采样: {src_w}×{src_h} → {detect_size['width']}×{detect_size['height']} "
+                f"({self.downsample_interpolation})"
+            )
+        elif self.downsample_enabled:
+            _log("下采样已启用但源图不超过目标边长，使用原图检测")
+
+        _check_stop(should_stop)
+
+        _stage(f"检测 {path.name}")
+        t0 = time.time()
+        dets = self.detector.detect(detect_img, should_stop=should_stop)
+        det_time = time.time() - t0
+        skip_stats = dict(self.detector.last_skip_stats)
+        _log(f"检测完成: {len(dets)} 个目标, 耗时 {det_time:.2f}s")
+
+        img_out_dir = image_output_dir(self.output_dir, stem, len(dets))
+        img_out_dir.mkdir(parents=True, exist_ok=True)
+
+        downsampled_path = ""
+        if did_resize:
+            downsampled_path = str(img_out_dir / f"{stem}_detect_input.jpg")
+            cv2.imwrite(downsampled_path, detect_img, [int(cv2.IMWRITE_JPEG_QUALITY), 92])
+            _log(f"下采样图已保存: {downsampled_path}")
+
+        boxes = detections_to_opencv_boxes(dets, with_classification=False)
+        json_path, csv_path = write_detect_boxes_files(
+            img_out_dir,
+            f"{stem}.jpg",
+            detect_size,
+            boxes,
+            with_classification=False,
+        )
+        _log(f"坐标已保存: {json_path.name}, {csv_path.name}")
+
+        vis_path = ""
+        if self.save_visualization and dets:
+            vis_path = save_detection_visualization(img_out_dir, detect_img, dets)
+            _log(f"可视化已保存: {Path(vis_path).name}")
+
+        return {
+            "image": f"{stem}.jpg",
+            "mode": "detect_only",
+            "total_diamonds": len(dets),
+            "defect_counts": {},
+            "contained_skipped": int(skip_stats.get("contained_skipped", 0)),
+            "small_skipped": int(skip_stats.get("small_skipped", 0)),
+            "aspect_skipped": int(skip_stats.get("aspect_skipped", 0)),
+            "edge_skipped": int(skip_stats.get("edge_skipped", 0)),
+            "detection_time_s": round(det_time, 3),
+            "classification_time_s": 0.0,
+            "total_time_s": round(det_time, 3),
+            "output_dir": str(img_out_dir),
+            "source_size": {"width": src_w, "height": src_h},
+            "detect_input_size": detect_size,
+            "downsampled": did_resize,
+            "downsample_interpolation": self.downsample_interpolation if did_resize else "",
+            "downsampled_image": downsampled_path,
+            "boxes_json": str(json_path),
+            "boxes_csv": str(csv_path),
+            "visualization_detection": vis_path,
+        }
+
+    @staticmethod
+    def _empty_stats(stem: str, out_dir: str) -> dict:
+        return {
+            "image": f"{stem}.jpg",
+            "mode": "detect_only",
+            "total_diamonds": 0,
+            "defect_counts": {},
+            "contained_skipped": 0,
+            "small_skipped": 0,
+            "aspect_skipped": 0,
+            "edge_skipped": 0,
+            "detection_time_s": 0.0,
+            "classification_time_s": 0.0,
+            "total_time_s": 0.0,
+            "output_dir": out_dir,
+            "source_size": {"width": 0, "height": 0},
+            "detect_input_size": {"width": 0, "height": 0},
+            "downsampled": False,
+            "downsampled_image": "",
+            "boxes_json": "",
+            "boxes_csv": "",
+        }
 
 
 # ════════════════════════════════════════════════════════════════════════

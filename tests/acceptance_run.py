@@ -330,9 +330,8 @@ def main() -> int:
                                     output_dir=str(out_dir), crop_padding=15)
                 # 用相对较小图做冒烟（钻石模型可能 0 检出，仍应产出统计与 summary）
                 stats = pipe.process_image(str(samples[0]))
-                stem = Path(samples[0]).stem
-                img_out = out_dir / stem
-                has_json = (img_out / "statistics.json").is_file() or (img_out / "result.json").is_file()
+                img_out = Path(stats.get("output_dir") or "")
+                has_json = (img_out / "detect_boxes.json").is_file()
                 # summary 由 C# 写；这里补写验证目录能力
                 summary = out_dir / "summary.csv"
                 summary.write_text(

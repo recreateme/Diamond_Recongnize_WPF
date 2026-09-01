@@ -35,6 +35,20 @@ public sealed class SahiRunOptions
     public double MaxAspectRatio { get; init; } = 1.5;
     public bool EdgeFilter { get; init; } = true;
     public int EdgeMarginPx { get; init; } = 20;
+
+    /// <summary>仅 SAHI 检测定位，不分类、不写 crops/可视化/summary。</summary>
+    public bool DetectOnly { get; init; }
+
+    /// <summary>检测前将最长边缩放到 DownsampleMaxSide（仅当源图更大时）。</summary>
+    public bool DownsampleEnabled { get; init; }
+
+    public int DownsampleMaxSide { get; init; } = 2560;
+
+    /// <summary>area / linear / cubic / nearest</summary>
+    public string DownsampleInterpolation { get; init; } = "area";
+
+    /// <summary>勾选后在输出子目录写入可视化 JPEG（完整模式：分类着色；仅检测：绿框）。</summary>
+    public bool SaveVisualization { get; init; }
 }
 
 public sealed class SahiImageStats
@@ -51,6 +65,9 @@ public sealed class SahiImageStats
     public int SmallSkipped { get; set; }
     public int AspectSkipped { get; set; }
     public int EdgeSkipped { get; set; }
+    public bool DetectOnly { get; set; }
+    public string? BoxesJsonPath { get; set; }
+    public string? BoxesCsvPath { get; set; }
 
     public int SkippedTotal => ContainedSkipped + SmallSkipped + AspectSkipped + EdgeSkipped;
 
@@ -58,6 +75,15 @@ public sealed class SahiImageStats
     {
         get
         {
+            if (DetectOnly)
+            {
+                var loc = $"仅定位 · {TotalDiamonds} 颗";
+                if (!string.IsNullOrEmpty(Error))
+                    return loc + $" · 错误: {Error}";
+                if (SkippedTotal > 0)
+                    loc += $" · 后处理剔除 {SkippedTotal}";
+                return loc;
+            }
             var dist = string.Join(" | ", DefectCounts.Select(kv => $"{kv.Key}:{kv.Value}"));
             if (!string.IsNullOrEmpty(Error))
                 return string.IsNullOrEmpty(dist) ? $"错误: {Error}" : dist + $" · 错误: {Error}";

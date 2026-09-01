@@ -57,6 +57,34 @@ function Copy-DirContents([string]$src, [string]$dst) {
     Copy-Item -Path (Join-Path $src "*") -Destination $dst -Recurse -Force
 }
 
+function Resolve-YoloSrc([string]$root, [string]$hint) {
+    if ($hint) {
+        if (Test-Path $hint) { return (Resolve-Path $hint).Path }
+        $rel = Join-Path $root $hint
+        if (Test-Path $rel) { return (Resolve-Path $rel).Path }
+    }
+    $cfgPath = Join-Path $root "app_config.json"
+    if (Test-Path $cfgPath) {
+        try {
+            $cfg = Get-Content $cfgPath -Raw -Encoding UTF8 | ConvertFrom-Json
+            $raw = [string]$cfg.yolo_path
+            if ($raw) {
+                if (Test-Path $raw) { return (Resolve-Path $raw).Path }
+                $rel = Join-Path $root $raw
+                if (Test-Path $rel) { return (Resolve-Path $rel).Path }
+            }
+        } catch { }
+    }
+    foreach ($cand in @(
+        (Join-Path $root "detect_weights\best.pt"),
+        (Join-Path $root "checkpoints\yolo.pt"),
+        (Join-Path $root "checkpoints\best.pt")
+    )) {
+        if (Test-Path $cand) { return (Resolve-Path $cand).Path }
+    }
+    return $null
+}
+
 $PublishDir = Join-Path $Root "dist\_wpf_publish"
 $DistRoot = if ($OutDir) { $OutDir } else { Join-Path $Root "dist\缺陷分类系统" }
 $CkptSrc = Join-Path $Root "checkpoints"
@@ -75,22 +103,18 @@ if (-not (Test-Path $onnx)) {
     throw "缺少 checkpoints/model.onnx，请先准备机台分类模型"
 }
 
-# YOLO 源
-$cfgPath = Join-Path $Root "app_config.json"
-if (-not $YoloPath -and (Test-Path $cfgPath)) {
-    try {
-        $cfg = Get-Content $cfgPath -Raw -Encoding UTF8 | ConvertFrom-Json
-        if ($cfg.yolo_path) { $YoloPath = [string]$cfg.yolo_path }
-    } catch { }
-}
+# YOLO 源（仅采纳真实存在的文件；与 python_core/scripts/build_deploy.py 一致）
+$YoloPath = Resolve-YoloSrc $Root $YoloPath
 if (-not $YoloPath) {
-    $cand = Join-Path $Root "detect_weights\best.pt"
-    if (Test-Path $cand) { $YoloPath = $cand }
+    throw @"
+缺少 YOLO 检测权重 best.pt，无法组装钻石检测模块。
+请任选其一后重试：
+  1) 将权重放到仓库 detect_weights/best.pt
+  2) 在 app_config.json 中设置可访问的 yolo_path（相对或绝对路径）
+  3) 打包时传入 -YoloPath `"D:\path\to\best.pt`"
+"@
 }
-if (-not $YoloPath -or -not (Test-Path $YoloPath)) {
-    Write-Warning "未找到 YOLO 权重，将写入配置 detect_weights/best.pt，请稍后手动放入。"
-    $YoloPath = ""
-}
+Write-Host "YOLO 源: $YoloPath" -ForegroundColor Cyan
 
 Write-Host "==> 组装 $DistRoot" -ForegroundColor Cyan
 if (Test-Path $DistRoot) { Remove-Item $DistRoot -Recurse -Force }
@@ -118,10 +142,8 @@ foreach ($name in @(
 # 4) YOLO
 $detDst = Join-Path $DistRoot "detect_weights"
 New-Item -ItemType Directory -Path $detDst -Force | Out-Null
-if ($YoloPath) {
-    Copy-Item $YoloPath (Join-Path $detDst "best.pt") -Force
-    Write-Host "YOLO -> detect_weights/best.pt"
-}
+Copy-Item $YoloPath (Join-Path $detDst "best.pt") -Force
+Write-Host "YOLO -> detect_weights/best.pt"
 
 # 5) 机台 app_config.json（相对路径）
 $deployCfg = [ordered]@{

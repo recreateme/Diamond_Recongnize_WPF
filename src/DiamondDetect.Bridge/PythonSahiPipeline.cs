@@ -1,23 +1,23 @@
 using System.Globalization;
 using System.Text;
 using DiamondDetect.Core.Abstractions;
+using DiamondDetect.Core.Services;
 using Python.Runtime;
 
 namespace DiamondDetect.Bridge;
 
 /// <summary>
-/// 调用 python_core.sahi_detector.SahiDetector / SahiPipeline，对齐原 SahiPipelineWorker。
+/// 调用 python_core.sahi_detector：完整流水线或 detect-only 定位。
 /// </summary>
 public sealed class PythonSahiPipeline : ISahiPipeline
 {
     private readonly IPythonRuntimeHost _host;
-    private readonly PythonInferenceEngine _classifier;
+    private readonly PythonInferenceEngine? _classifier;
 
     public PythonSahiPipeline(IPythonRuntimeHost host, IInferenceEngine classifier)
     {
         _host = host;
-        _classifier = classifier as PythonInferenceEngine
-            ?? throw new ArgumentException("SAHI 需要 PythonInferenceEngine 作为分类器。", nameof(classifier));
+        _classifier = classifier as PythonInferenceEngine;
     }
 
     public Task<IReadOnlyList<SahiImageStats>> ProcessImagesAsync(
@@ -35,12 +35,16 @@ public sealed class PythonSahiPipeline : ISahiPipeline
         IProgress<SahiProgress>? progress,
         CancellationToken cancellationToken)
     {
-        if (!_classifier.IsLoaded || _classifier.NativeEngine is null)
-            throw new InvalidOperationException("分类引擎未加载，请先在「设置 → 分类配置」中加载分类模型。");
         if (string.IsNullOrWhiteSpace(options.YoloPath) || !File.Exists(options.YoloPath))
             throw new FileNotFoundException("未配置有效的 YOLO 模型。", options.YoloPath);
         if (imagePaths.Count == 0)
             throw new ArgumentException("未选择输入图像。");
+
+        if (!options.DetectOnly)
+        {
+            if (_classifier is null || !_classifier.IsLoaded || _classifier.NativeEngine is null)
+                throw new InvalidOperationException("分类引擎未加载，请先在「设置 → 分类配置」中加载分类模型。");
+        }
 
         Directory.CreateDirectory(options.OutputDir);
         _host.Initialize();
@@ -48,6 +52,8 @@ public sealed class PythonSahiPipeline : ISahiPipeline
         var allStats = new List<SahiImageStats>();
         var total = imagePaths.Count;
 
+        try
+        {
         using (Py.GIL())
         {
             dynamic sahi = Py.Import("sahi_detector");
@@ -74,11 +80,29 @@ public sealed class PythonSahiPipeline : ISahiPipeline
                 Message = loadMsg,
             });
 
-            dynamic pipeline = sahi.SahiPipeline(
-                detector,
-                _classifier.NativeEngine,
-                options.OutputDir,
-                options.CropPadding);
+            dynamic pipeline;
+            if (options.DetectOnly)
+            {
+                pipeline = sahi.SahiDetectOnlyPipeline(
+                    detector,
+                    options.OutputDir,
+                    downsample_enabled: options.DownsampleEnabled,
+                    downsample_max_side: options.DownsampleMaxSide,
+                    downsample_interpolation: options.DownsampleInterpolation ?? "area",
+                    save_visualization: options.SaveVisualization);
+            }
+            else
+            {
+                pipeline = sahi.SahiPipeline(
+                    detector,
+                    _classifier!.NativeEngine,
+                    options.OutputDir,
+                    options.CropPadding,
+                    save_visualization: options.SaveVisualization);
+            }
+
+            var cancelBridge = new CancellationBridge(cancellationToken);
+            Func<bool> shouldStop = cancelBridge.ShouldStop;
 
             for (var i = 0; i < imagePaths.Count; i++)
             {
@@ -95,8 +119,16 @@ public sealed class PythonSahiPipeline : ISahiPipeline
                 SahiImageStats stats;
                 try
                 {
-                    dynamic raw = pipeline.process_image(imgPath);
-                    stats = MapStats(raw);
+                    dynamic raw = pipeline.process_image(imgPath, should_stop: shouldStop);
+                    stats = MapStats(raw, options.DetectOnly);
+                }
+                catch (PythonException ex) when (IsPipelineCancelled(ex))
+                {
+                    throw new OperationCanceledException(cancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
                 }
                 catch (Exception ex)
                 {
@@ -105,6 +137,7 @@ public sealed class PythonSahiPipeline : ISahiPipeline
                         Image = name,
                         Error = ex.Message,
                         TotalDiamonds = 0,
+                        DetectOnly = options.DetectOnly,
                     };
                 }
 
@@ -121,7 +154,11 @@ public sealed class PythonSahiPipeline : ISahiPipeline
             }
         }
 
-        WriteSummaryCsv(options.OutputDir, allStats);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (!options.DetectOnly)
+            SahiSummaryCsv.Write(options.OutputDir, allStats);
+
         progress?.Report(new SahiProgress
         {
             Current = total,
@@ -129,9 +166,16 @@ public sealed class PythonSahiPipeline : ISahiPipeline
             Message = cancellationToken.IsCancellationRequested ? "已停止" : "处理完成",
         });
         return allStats;
+        }
+        catch (OperationCanceledException)
+        {
+            if (!options.DetectOnly && allStats.Count > 0)
+                SahiSummaryCsv.Write(options.OutputDir, allStats);
+            throw;
+        }
     }
 
-    private static SahiImageStats MapStats(dynamic raw)
+    private static SahiImageStats MapStats(dynamic raw, bool detectOnly)
     {
         var s = new SahiImageStats
         {
@@ -146,17 +190,24 @@ public sealed class PythonSahiPipeline : ISahiPipeline
             SmallSkipped = (int)GetDouble(raw, "small_skipped"),
             AspectSkipped = (int)GetDouble(raw, "aspect_skipped"),
             EdgeSkipped = (int)GetDouble(raw, "edge_skipped"),
+            DetectOnly = detectOnly,
+            BoxesJsonPath = NullIfEmpty(GetStr(raw, "boxes_json")),
+            BoxesCsvPath = NullIfEmpty(GetStr(raw, "boxes_csv")),
         };
+
+        if (detectOnly)
+            return s;
 
         try
         {
-            if (HasKey(raw, "defect_counts"))
+            if (HasKey(raw, "defect_counts") && raw["defect_counts"] is not null)
             {
                 dynamic counts = raw["defect_counts"];
                 foreach (var key in counts)
                 {
-                    var k = key.ToString()!;
-                    s.DefectCounts[k] = Convert.ToInt32(counts[k], CultureInfo.InvariantCulture);
+                    var k = key.ToString();
+                    if (string.IsNullOrEmpty(k)) continue;
+                    s.DefectCounts[k] = Convert.ToInt32(counts[key], CultureInfo.InvariantCulture);
                 }
             }
         }
@@ -166,64 +217,6 @@ public sealed class PythonSahiPipeline : ISahiPipeline
         }
 
         return s;
-    }
-
-    /// <summary>与应用有效类别一致的固定列顺序（summary.csv 表头稳定）。</summary>
-    private static readonly string[] SummaryClassColumns = { "棱边朝上", "点朝上", "面朝上" };
-
-    private static void WriteSummaryCsv(string outputDir, IReadOnlyList<SahiImageStats> allStats)
-    {
-        if (allStats.Count == 0) return;
-        try
-        {
-            var csvPath = Path.Combine(outputDir, "summary.csv");
-            var sb = new StringBuilder();
-            sb.Append("图像,汇总钻石数,");
-            sb.Append(string.Join(",", SummaryClassColumns));
-            sb.AppendLine(",检测耗时(s),分类耗时(s),总耗时(s)");
-
-            var classTotals = new int[SummaryClassColumns.Length];
-            var diamondTotal = 0;
-
-            foreach (var s in allStats)
-            {
-                diamondTotal += s.TotalDiamonds;
-                sb.Append(Csv(s.Image)).Append(',').Append(s.TotalDiamonds);
-                for (var i = 0; i < SummaryClassColumns.Length; i++)
-                {
-                    var n = s.DefectCounts.TryGetValue(SummaryClassColumns[i], out var c) ? c : 0;
-                    classTotals[i] += n;
-                    sb.Append(',').Append(n);
-                }
-                sb.Append(',')
-                  .Append(s.DetectionTimeS.ToString("0.###", CultureInfo.InvariantCulture)).Append(',')
-                  .Append(s.ClassificationTimeS.ToString("0.###", CultureInfo.InvariantCulture)).Append(',')
-                  .Append(s.TotalTimeS.ToString("0.###", CultureInfo.InvariantCulture))
-                  .AppendLine();
-            }
-
-            // 多张图才追加一行批次合计；单张不写汇总行
-            if (allStats.Count > 1)
-            {
-                sb.Append(Csv("批次合计")).Append(',').Append(diamondTotal);
-                for (var i = 0; i < SummaryClassColumns.Length; i++)
-                    sb.Append(',').Append(classTotals[i]);
-                sb.AppendLine(",,,");
-            }
-
-            File.WriteAllText(csvPath, sb.ToString(), new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
-        }
-        catch
-        {
-            // non-fatal
-        }
-    }
-
-    private static string Csv(string value)
-    {
-        if (value.Contains('"') || value.Contains(',') || value.Contains('\n'))
-            return "\"" + value.Replace("\"", "\"\"") + "\"";
-        return value;
     }
 
     private static bool HasKey(dynamic raw, string key)
@@ -263,4 +256,12 @@ public sealed class PythonSahiPipeline : ISahiPipeline
     }
 
     private static string? NullIfEmpty(string s) => string.IsNullOrWhiteSpace(s) ? null : s;
+
+    private static bool IsPipelineCancelled(PythonException ex)
+    {
+        var typeName = ex.Type?.ToString() ?? "";
+        if (typeName.Contains("PipelineCancelledError", StringComparison.Ordinal))
+            return true;
+        return ex.Message.Contains("PipelineCancelledError", StringComparison.Ordinal);
+    }
 }
