@@ -11,11 +11,12 @@ namespace DiamondDetect.Wpf.ViewModels;
 public partial class MainViewModel : ObservableObject
 {
     public const int NavDiamond = 0;
-    public const int NavDetect = 1;
-    public const int NavResults = 2;
-    public const int NavCorrect = 3;
-    public const int NavRetrain = 4;
-    public const int NavSettings = 5;
+    public const int NavUniformity = 1;
+    public const int NavDetect = 2;
+    public const int NavResults = 3;
+    public const int NavCorrect = 4;
+    public const int NavRetrain = 5;
+    public const int NavSettings = 6;
 
     private readonly AppSession _session;
     private readonly IInferenceEngine _engine;
@@ -26,6 +27,7 @@ public partial class MainViewModel : ObservableObject
     private Action? _refreshCorrection;
     private Action? _stopDetection;
     private Action? _stopDiamond;
+    private Action? _stopUniformity;
     private Action? _stopTrain;
 
     public MainViewModel(
@@ -49,12 +51,14 @@ public partial class MainViewModel : ObservableObject
         Action refreshCorrection,
         Action stopDetection,
         Action stopDiamond,
+        Action stopUniformity,
         Action stopTrain)
     {
         _refreshResults = refreshResults;
         _refreshCorrection = refreshCorrection;
         _stopDetection = stopDetection;
         _stopDiamond = stopDiamond;
+        _stopUniformity = stopUniformity;
         _stopTrain = stopTrain;
     }
 
@@ -165,6 +169,7 @@ public partial class MainViewModel : ObservableObject
     {
         _stopDetection?.Invoke();
         _stopDiamond?.Invoke();
+        _stopUniformity?.Invoke();
         _stopTrain?.Invoke();
         StatusText = "已发送停止请求";
     }

@@ -17,6 +17,7 @@
 | `inference_engine.py` | 开发版 PyTorch/ONNX 分类 |
 | `inference_engine_onnx.py` | 机台 ONNX Runtime 分类 |
 | `sahi_detector.py` | SAHI + YOLO 大图流水线 |
+| `diamond_uniformity.py` | 单 tile 均匀度评分 + `uniformity_vis` 可视化 |
 | `train.py` | 训练 / 微调 / ONNX 导出（训练仍可产生阈值校准文件，应用侧忽略） |
 | `analyze_image_sizes.py` | 图像尺寸分析 |
 | `app_paths.py` | 路径与 ORT DLL |
@@ -27,6 +28,7 @@
 ## 依赖
 
 见 `requirements.txt`（开发）与 `requirements-deploy.txt`（机台）。  
+均匀度另需 `scipy`、`shapely`（已写入上述清单）。  
 UI 已迁 WPF，**不再依赖 PyQt5**；清单中若仍写 PyQt5，仅为与旧环境对照，新环境可不装。
 
 ```powershell

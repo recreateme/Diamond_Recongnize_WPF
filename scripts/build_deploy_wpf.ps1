@@ -166,6 +166,7 @@ $deployCfg = [ordered]@{
     sahi_max_aspect_ratio   = 1.5
     sahi_edge_filter        = $true
     sahi_edge_margin_px     = 20
+    uniformity_conf_threshold = 0.25
 }
 $deployCfg | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $DistRoot "app_config.json") -Encoding UTF8
 
@@ -294,3 +295,4 @@ Set-Content -Path (Join-Path $DistRoot "README_机台.txt") -Value $readme -Enco
 Write-Host ""
 Write-Host "组装完成: $DistRoot" -ForegroundColor Green
 Write-Host "请运行 验收_verify.bat 或: `$env:DEFECTS_VERIFY=1; .\DiamondDetect.exe --verify"
+exit 0

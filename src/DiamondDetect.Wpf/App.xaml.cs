@@ -53,11 +53,14 @@ public partial class App : Application
             new PythonSahiPipeline(
                 sp.GetRequiredService<IPythonRuntimeHost>(),
                 sp.GetRequiredService<IInferenceEngine>()));
+        services.AddSingleton<IUniformityAnalyzer>(sp =>
+            new PythonUniformityAnalyzer(sp.GetRequiredService<IPythonRuntimeHost>()));
         services.AddSingleton<ExportService>();
         services.AddSingleton<ITrainRunner>(sp =>
             new ProcessTrainRunner(sp.GetRequiredService<IPythonRuntimeHost>()));
         services.AddSingleton<MainViewModel>();
         services.AddSingleton<DiamondDetectViewModel>();
+        services.AddSingleton<UniformityViewModel>();
         services.AddSingleton<DetectionViewModel>();
         services.AddSingleton<ResultsViewModel>();
         services.AddSingleton<CorrectionViewModel>();

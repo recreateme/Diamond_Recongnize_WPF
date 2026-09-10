@@ -6,6 +6,7 @@ namespace DiamondDetect.Core;
 /// </summary>
 public static class BridgeApi
 {
-    public const string Version = "1.0.0";
-    public const string PythonCoreContract = "inference_common.result_dict + app_config.json";
+    public const string Version = "1.1.0";
+    public const string PythonCoreContract =
+        "inference_common.result_dict + app_config.json + diamond_uniformity";
 }

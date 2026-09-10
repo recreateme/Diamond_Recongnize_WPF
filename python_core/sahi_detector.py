@@ -1311,6 +1311,7 @@ def detections_to_opencv_boxes(
             "y1": int(d.y1),
             "x2": int(d.x2),
             "y2": int(d.y2),
+            "det_conf": round(float(d.conf), 4),
         }
         if with_classification:
             box["defect_class"] = d.display_class or ""
@@ -1339,16 +1340,16 @@ def write_detect_boxes_files(
         "count": len(boxes),
         "detect_input_size": detect_size,
         "coordinate_system": "opencv_abs_xyxy",
-        "note": "x1,y1,x2,y2 are int(); origin top-left; coords match image used for detection",
+        "note": "x1,y1,x2,y2 are int(); origin top-left; coords match image used for detection; det_conf is YOLO detection score",
         "boxes": boxes,
     }
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, indent=2)
 
     if with_classification:
-        header = ["id", "x1", "y1", "x2", "y2", "defect_class", "defect_conf"]
+        header = ["id", "x1", "y1", "x2", "y2", "det_conf", "defect_class", "defect_conf"]
     else:
-        header = ["id", "x1", "y1", "x2", "y2"]
+        header = ["id", "x1", "y1", "x2", "y2", "det_conf"]
 
     with open(csv_path, "w", newline="", encoding="utf-8-sig") as f:
         writer = csv.writer(f)
@@ -1357,10 +1358,14 @@ def write_detect_boxes_files(
             if with_classification:
                 writer.writerow([
                     b["id"], b["x1"], b["y1"], b["x2"], b["y2"],
+                    b.get("det_conf", ""),
                     b.get("defect_class", ""), b.get("defect_conf", ""),
                 ])
             else:
-                writer.writerow([b["id"], b["x1"], b["y1"], b["x2"], b["y2"]])
+                writer.writerow([
+                    b["id"], b["x1"], b["y1"], b["x2"], b["y2"],
+                    b.get("det_conf", ""),
+                ])
 
     return json_path, csv_path
 

@@ -36,8 +36,13 @@
                 </GroupBox>
 
                 <GroupBox Header="输出选项" Margin="0,0,0,10" Padding="10">
-                    <CheckBox Content="保存可视化结果（检测+分类：分类着色图；仅检测：绿框检测图）"
-                              IsChecked="{Binding SaveVisualization}"/>
+                    <StackPanel>
+                        <CheckBox Content="保存可视化结果（检测+分类：分类着色图；仅检测：绿框检测图）"
+                                  IsChecked="{Binding SaveVisualization}" Margin="0,0,0,8"/>
+                        <CheckBox Content="完成后计算均匀度（完整模式；写入 uniformity_scores.json / uniformity_summary.csv）"
+                                  IsChecked="{Binding RunUniformityAfter}"
+                                  IsEnabled="{Binding DetectOnly, Converter={StaticResource InvertBool}}"/>
+                    </StackPanel>
                 </GroupBox>
 
                 <GroupBox Header="输入图像" Margin="0,0,0,10" Padding="10">

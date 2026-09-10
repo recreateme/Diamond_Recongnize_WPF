@@ -27,6 +27,7 @@ public partial class DiamondDetectViewModel : ObservableObject
     private readonly IInferenceEngine _engine;
     private readonly ISahiPipeline _sahi;
     private readonly MainViewModel _main;
+    private readonly UniformityViewModel _uniformity;
     private CancellationTokenSource? _cts;
     private List<string> _imgPaths = new();
     private string _inputFolder = "";
@@ -35,12 +36,14 @@ public partial class DiamondDetectViewModel : ObservableObject
         AppSession session,
         IInferenceEngine engine,
         ISahiPipeline sahi,
-        MainViewModel main)
+        MainViewModel main,
+        UniformityViewModel uniformity)
     {
         _session = session;
         _engine = engine;
         _sahi = sahi;
         _main = main;
+        _uniformity = uniformity;
         OutputDir = ResolveDefaultOutput();
     }
 
@@ -52,7 +55,8 @@ public partial class DiamondDetectViewModel : ObservableObject
         "大图 SAHI 切片检测 + 缺陷分类。可选「仅检测定位」输出坐标 JSON/CSV；「输出选项」可保存可视化图。";
     [ObservableProperty] private bool detectOnly;
     [ObservableProperty] private bool saveVisualization;
-    [ObservableProperty] private bool downsampleEnabled = true;
+    [ObservableProperty] private bool runUniformityAfter;
+    [ObservableProperty] private bool downsampleEnabled;
     [ObservableProperty] private int downsampleMaxSide = 2560;
     [ObservableProperty] private string selectedInterpolation = "area";
     [ObservableProperty] private string inputPathText = "未选择图像";
@@ -230,6 +234,36 @@ public partial class DiamondDetectViewModel : ObservableObject
         // 完整模式：单张/多图/文件夹批量均写出 summary.csv（与历史表头一致）
         if (!DetectOnly && stats.Count > 0 && !string.IsNullOrWhiteSpace(OutputDir))
             SahiSummaryCsv.Write(OutputDir, stats);
+
+        if (!cancelled
+            && !DetectOnly
+            && RunUniformityAfter
+            && stats.Count > 0
+            && !string.IsNullOrWhiteSpace(OutputDir)
+            && string.IsNullOrEmpty(errorMessage))
+        {
+            try
+            {
+                StageVisible = true;
+                StageText = "正在计算均匀度…";
+                _main.IsBusy = true;
+                _main.StatusText = "检测完成，正在计算均匀度…";
+                await _uniformity.RunForOutputRootAsync(OutputDir);
+                _main.StatusText = "均匀度已写入各子目录 uniformity_scores.json 与根目录 uniformity_summary.csv";
+            }
+            catch (Exception ex)
+            {
+                LocalDiagnostics.Error("uniformity.after_sahi", ex);
+                MessageBox.Show(
+                    "检测已完成，但均匀度计算失败：\n" + UserMessage.Format(ex),
+                    "均匀度", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+            finally
+            {
+                StageVisible = false;
+                _main.IsBusy = false;
+            }
+        }
 
         if (stats.Count > 0 && !cancelled)
         {

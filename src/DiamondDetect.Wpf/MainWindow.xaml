@@ -18,6 +18,7 @@
         <KeyBinding Key="D4" Modifiers="Control" Command="{Binding NavigateCommand}" CommandParameter="3"/>
         <KeyBinding Key="D5" Modifiers="Control" Command="{Binding NavigateCommand}" CommandParameter="4"/>
         <KeyBinding Key="D6" Modifiers="Control" Command="{Binding NavigateCommand}" CommandParameter="5"/>
+        <KeyBinding Key="D7" Modifiers="Control" Command="{Binding NavigateCommand}" CommandParameter="6"/>
         <KeyBinding Key="Oem1" Modifiers="Control" Command="{Binding NavigateCommand}" CommandParameter="0"/>
         <KeyBinding Key="F5" Command="{Binding RefreshCurrentCommand}"/>
         <KeyBinding Key="Escape" Command="{Binding StopBusyCommand}"/>
@@ -30,7 +31,7 @@
             <StatusBarItem HorizontalAlignment="Right">
                 <StackPanel Orientation="Horizontal">
                     <TextBlock Text="{Binding EngineInfo}" Foreground="#455A64" Margin="0,0,12,0"/>
-                    <TextBlock Text="Ctrl+1…6 切换页 · Esc 停止 · F5 刷新" Foreground="#90A4AE" FontSize="11"/>
+                    <TextBlock Text="Ctrl+1…7 切换页 · Esc 停止 · F5 刷新" Foreground="#90A4AE" FontSize="11"/>
                 </StackPanel>
             </StatusBarItem>
         </StatusBar>
@@ -47,26 +48,30 @@
                                  GroupName="Nav" IsChecked="True"
                                  Command="{Binding NavigateCommand}" CommandParameter="0"
                                  ToolTip="Ctrl+1"/>
-                    <RadioButton Style="{StaticResource NavButtonStyle}" Content="缺陷检测"
+                    <RadioButton Style="{StaticResource NavButtonStyle}" Content="均匀度分析"
                                  GroupName="Nav"
                                  Command="{Binding NavigateCommand}" CommandParameter="1"
                                  ToolTip="Ctrl+2"/>
-                    <RadioButton Style="{StaticResource NavButtonStyle}" Content="结果管理"
+                    <RadioButton Style="{StaticResource NavButtonStyle}" Content="缺陷检测"
                                  GroupName="Nav"
                                  Command="{Binding NavigateCommand}" CommandParameter="2"
                                  ToolTip="Ctrl+3"/>
-                    <RadioButton Style="{StaticResource NavButtonStyle}" Content="{Binding CorrectionNavText}"
+                    <RadioButton Style="{StaticResource NavButtonStyle}" Content="结果管理"
                                  GroupName="Nav"
                                  Command="{Binding NavigateCommand}" CommandParameter="3"
                                  ToolTip="Ctrl+4"/>
-                    <RadioButton Style="{StaticResource NavButtonStyle}" Content="模型再训练"
+                    <RadioButton Style="{StaticResource NavButtonStyle}" Content="{Binding CorrectionNavText}"
                                  GroupName="Nav"
                                  Command="{Binding NavigateCommand}" CommandParameter="4"
                                  ToolTip="Ctrl+5"/>
-                    <RadioButton Style="{StaticResource NavButtonStyle}" Content="设置"
+                    <RadioButton Style="{StaticResource NavButtonStyle}" Content="模型再训练"
                                  GroupName="Nav"
                                  Command="{Binding NavigateCommand}" CommandParameter="5"
                                  ToolTip="Ctrl+6"/>
+                    <RadioButton Style="{StaticResource NavButtonStyle}" Content="设置"
+                                 GroupName="Nav"
+                                 Command="{Binding NavigateCommand}" CommandParameter="6"
+                                 ToolTip="Ctrl+7"/>
                 </StackPanel>
             </DockPanel>
         </Border>
@@ -87,6 +92,7 @@
                     </Style>
                 </TabControl.ItemContainerStyle>
                 <TabItem><views:DiamondDetectView x:Name="DiamondViewHost"/></TabItem>
+                <TabItem><views:UniformityView x:Name="UniformityViewHost"/></TabItem>
                 <TabItem><views:DetectionView x:Name="DetectViewHost"/></TabItem>
                 <TabItem><views:ResultsView x:Name="ResultsViewHost"/></TabItem>
                 <TabItem><views:CorrectionView x:Name="CorrectionViewHost"/></TabItem>

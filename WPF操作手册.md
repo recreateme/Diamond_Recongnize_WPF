@@ -1,14 +1,13 @@
 # 钻石缺陷检测系统 — WPF 操作手册
 
-面向 **不熟悉 WPF** 的开发与维护人员：说明本仓库技术栈、目录模块、日常开发/运行/维护方式。  
-实施节奏与阶段划分见同目录 [`WPF重构实施计划.md`](WPF重构实施计划.md)。
+面向 **开发与维护** 人员：技术栈、目录、环境、调试与日常运维。  
+**产品功能、算法与模型配置**请优先阅读 [`docs/应用功能与算法说明.md`](docs/应用功能与算法说明.md)。
 
 | 项 | 内容 |
 |----|------|
 | 项目根目录 | `D:\Develop\diamond_detect_wpf` |
-| 源参考仓 | `D:\Develop\defect_detect`（PyQt5 原版，算法同源） |
-| 文档版本 | v1.2 |
-| 日期 | 2026-09-01 |
+| 文档版本 | v1.3 |
+| 日期 | 2026-09-10 |
 
 ---
 
@@ -57,11 +56,11 @@
 
 ### 建议阅读顺序（第一次接触仓库）
 
-1. 本文第 3–5 节（技术栈与目录）
-2. `src/DiamondDetect.Wpf/MainWindow.xaml`（壳与导航）
-3. `src/DiamondDetect.Core/`（配置、结果模型、接口）
-4. `python_core/README.md`（算法入口）
-5. [`WPF重构实施计划.md`](WPF重构实施计划.md) 中当前 Phase
+1. [`docs/应用功能与算法说明.md`](docs/应用功能与算法说明.md)（功能与配置总览）
+2. 本文第 3–5 节（技术栈与目录）
+3. `src/DiamondDetect.Wpf/MainWindow.xaml`（壳与导航）
+4. `src/DiamondDetect.Core/`（配置、结果模型、接口）
+5. `python_core/README.md`（算法入口）
 
 ---
 
@@ -72,7 +71,7 @@
 | 组件 | 选型 | 作用 |
 |------|------|------|
 | 运行时 | **.NET 8**（Windows Desktop） | WPF 宿主 |
-| UI | **WPF** | 六大功能页 |
+| UI | **WPF** | 七大功能页（含均匀度分析） |
 | MVVM | CommunityToolkit.Mvvm | `ObservableObject` / `RelayCommand` |
 | DI | Microsoft.Extensions.DependencyInjection | 注册 Session、Bridge |
 | IDE | **Visual Studio 2026**（主） | XAML 设计、调试、发布 |
@@ -117,17 +116,21 @@
 
 ```
 diamond_detect_wpf/
-├── WPF操作手册.md              ← 本文
-├── WPF重构实施计划.md
+├── WPF操作手册.md              ← 本文（开发/运维）
 ├── README.md
+├── docs/
+│   ├── 应用功能与算法说明.md   ← 产品主手册
+│   ├── CONTRACTS.md
+│   └── …
 ├── DiamondDetect.sln           ← Visual Studio 打开此文件
 ├── src/
 │   ├── DiamondDetect.Wpf/      ← 界面：Views、ViewModels、Themes
 │   ├── DiamondDetect.Core/     ← 领域模型、配置、接口（不依赖 UI）
 │   └── DiamondDetect.Bridge/   ← pythonnet / IPC，调用 python_core
-├── python_core/                ← ★ 原算法模块（权威实现）
+├── python_core/                ← ★ 算法模块（权威实现，含 diamond_uniformity.py）
 │   ├── inference_*.py
 │   ├── sahi_detector.py
+│   ├── diamond_uniformity.py
 │   ├── train.py
 │   ├── app_paths.py
 │   ├── scripts/                ← 打包与验收
@@ -175,18 +178,19 @@ diamond_detect_wpf/
 | `train.py` | 训练策略、导出 ONNX |
 | `scripts/build_deploy*.py` | 机台打包流程 |
 
-完整保留清单见实施计划「模块保留确认表」。
+完整模块与配置说明见 [`docs/应用功能与算法说明.md`](docs/应用功能与算法说明.md)；契约见 [`docs/CONTRACTS.md`](docs/CONTRACTS.md)。
 
-### 4.5 六大功能页对照
+### 4.5 七大功能页对照
 
-| 导航 | View | 原 PyQt 页 | 主要干什么 |
-|------|------|------------|------------|
-| 钻石检测分类 | `DiamondDetectView` | `DiamondDetectPage` | SAHI 大图流水线（已实现） |
-| 缺陷检测 | `DetectionView` | `DetectionPage` | 单张 / 批量分类 |
-| 结果管理 | `ResultsView` | `ResultsPage` | 筛选、导出、预览 |
-| 误分类修正 | `CorrectionView` | `CorrectionPage` | 归档到 `corrections/`（已实现） |
-| 模型再训练 | `RetrainView` | `RetrainPage` | 调 `train.py`（机台只读，已实现） |
-| 设置 | `SettingsView` | `SettingsPage` | 分类 + 切片参数（默认管理员锁） |
+| 导航 | View | 主要干什么 |
+|------|------|------------|
+| 钻石检测分类 | `DiamondDetectView` | SAHI 大图检测+分类；可选联动均匀度 |
+| 均匀度分析 | `UniformityView` | 产品输出根打分 / 可视化 |
+| 缺陷检测 | `DetectionView` | 单张 / 批量小图分类 |
+| 结果管理 | `ResultsView` | 筛选、导出、预览 |
+| 误分类修正 | `CorrectionView` | 归档到 `corrections/` |
+| 模型再训练 | `RetrainView` | 调 `train.py`（机台只读） |
+| 设置 | `SettingsPage` | 分类 + 切片参数（默认管理员锁） |
 
 ---
 
@@ -268,7 +272,7 @@ dotnet run --project src\DiamondDetect.Wpf
 
 | 快捷键 | 作用 |
 |--------|------|
-| Ctrl+1…6 | 切换六大功能页 |
+| Ctrl+1…7 | 切换七大功能页 |
 | F5 | 刷新结果管理 / 误分类修正列表 |
 | Esc | 停止批量检测 / SAHI / 训练 |
 
@@ -474,11 +478,12 @@ python scripts\verify_deploy.py
 
 | 文档 | 用途 |
 |------|------|
-| [`WPF重构实施计划.md`](WPF重构实施计划.md) | 阶段任务、风险、验收矩阵 |
+| [`docs/应用功能与算法说明.md`](docs/应用功能与算法说明.md) | 功能页、算法摘要、模型/训练配置 |
+| [`docs/CONTRACTS.md`](docs/CONTRACTS.md) | 配置与结果契约 |
+| [`docs/验收清单.md`](docs/验收清单.md) | 功能验收勾选 |
+| [`docs/打包部署说明.md`](docs/打包部署说明.md) | 机台打包 |
 | `python_core/README.md` | Python 模块索引与命令 |
-| 源仓 `defect_detect/README.md` | 原业务与训练说明（算法仍适用） |
-| 源仓 `打包部署说明.md` | 机台经验（打包脚本演进时对照） |
 
 ---
 
-**维护提示**：算法以 `python_core` 为唯一修改点；界面以 WPF 项目为唯一修改点。两边契约（配置字段、结果 dict）变更时，请同步更新本文第 3.4 节与 `docs/CONTRACTS.md`（若已创建）。
+**维护提示**：算法以 `python_core` 为唯一修改点；界面以 WPF 项目为唯一修改点。两边契约（配置字段、结果 dict）变更时，请同步更新 [`docs/CONTRACTS.md`](docs/CONTRACTS.md) 与 [`docs/应用功能与算法说明.md`](docs/应用功能与算法说明.md)。

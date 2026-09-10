@@ -119,6 +119,71 @@ public interface ITrainRunner
         CancellationToken cancellationToken = default);
 }
 
+public sealed class UniformityScoreRow
+{
+    public string Image { get; set; } = "";
+    public string SourceJson { get; set; } = "";
+    public string ScoresJson { get; set; } = "";
+    public string VisPath { get; set; } = "";
+    public string SourceKind { get; set; } = "";
+    public int NPoints { get; set; }
+    public double? VoronoiAreaCvNormalized { get; set; }
+    public double? NnDistanceCvNormalized { get; set; }
+    public double? ClarkEvansR { get; set; }
+    public double? DelaunayEdgeCvNormalized { get; set; }
+    public double? GridDensityCv { get; set; }
+    public string Status { get; set; } = "";
+    public string ConfFilter { get; set; } = "";
+}
+
+public sealed class UniformityTileInfo
+{
+    public string Image { get; set; } = "";
+    public string JsonPath { get; set; } = "";
+    public string SourceKind { get; set; } = "";
+}
+
+public sealed class UniformityBatchResult
+{
+    public string OutputRoot { get; set; } = "";
+    public string? SummaryCsv { get; set; }
+    public IReadOnlyList<UniformityScoreRow> Rows { get; set; } = Array.Empty<UniformityScoreRow>();
+}
+
+public sealed class UniformityVisResult
+{
+    public string VisPath { get; set; } = "";
+    public string Status { get; set; } = "";
+    public string Background { get; set; } = "";
+    public int NPoints { get; set; }
+}
+
+public interface IUniformityAnalyzer
+{
+    /// <summary>列出产品输出根下可分析的 tile（优先 detect_boxes.json，否则 result.json）。</summary>
+    Task<IReadOnlyList<UniformityTileInfo>> ListTilesAsync(
+        string outputRoot,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 分析输出根；jsonPaths 为空则全部 tile，否则仅分析勾选子集。
+    /// 写回各子目录 uniformity_scores.json 与根目录 uniformity_summary.csv。
+    /// </summary>
+    Task<UniformityBatchResult> AnalyzeOutputRootAsync(
+        string outputRoot,
+        double confThreshold,
+        IReadOnlyList<string>? jsonPaths = null,
+        bool writeVisualization = false,
+        IProgress<(int current, int total, string message)>? progress = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>按需生成单张 uniformity_vis.jpg。</summary>
+    Task<UniformityVisResult> RenderVisualizationAsync(
+        string jsonPath,
+        double confThreshold,
+        CancellationToken cancellationToken = default);
+}
+
 public interface IPythonRuntimeHost : IDisposable
 {
     bool IsInitialized { get; }

@@ -1,6 +1,7 @@
 # WPF 应用开发说明
 
-面向在本仓库改界面 / Bridge 的开发者。算法细节见 `python_core/README.md`，契约见 [CONTRACTS.md](CONTRACTS.md)。
+面向在本仓库改界面 / Bridge 的开发者。  
+产品功能与算法见 [应用功能与算法说明.md](应用功能与算法说明.md)；算法目录见 `python_core/README.md`；契约见 [CONTRACTS.md](CONTRACTS.md)。
 
 ---
 
@@ -22,15 +23,18 @@ DiamondDetect.sln
 | 索引 | 页面 | View / ViewModel |
 |------|------|------------------|
 | 0 | 钻石检测分类 | `DiamondDetectView` |
-| 1 | 缺陷检测 | `DetectionView` |
-| 2 | 结果管理 | `ResultsView` |
-| 3 | 误分类修正 | `CorrectionView` |
-| 4 | 模型再训练 | `RetrainView` |
-| 5 | 设置 | `SettingsPage` |
+| 1 | 均匀度分析 | `UniformityView` |
+| 2 | 缺陷检测 | `DetectionView` |
+| 3 | 结果管理 | `ResultsView` |
+| 4 | 误分类修正 | `CorrectionView` |
+| 5 | 模型再训练 | `RetrainView` |
+| 6 | 设置 | `SettingsPage` |
 
 跨页共享：`AppSession` + `ResultStore`（DI 单例）。
 
-快捷键：`Ctrl+1…6` 导航，`F5` 刷新结果/修正，`Esc` 停止长任务。
+快捷键：`Ctrl+1…7` 导航，`F5` 刷新结果/修正，`Esc` 停止长任务。
+
+均匀度算法：`python_core/diamond_uniformity.py`，Bridge：`IUniformityAnalyzer` / `PythonUniformityAnalyzer`。
 
 ---
 

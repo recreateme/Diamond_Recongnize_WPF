@@ -65,6 +65,10 @@ public sealed class AppConfig
     [JsonPropertyName("sahi_edge_margin_px")]
     public int SahiEdgeMarginPx { get; set; } = 20;
 
+    /// <summary>均匀度分析：YOLO det_conf 过滤阈值（默认 0.25）。</summary>
+    [JsonPropertyName("uniformity_conf_threshold")]
+    public double UniformityConfThreshold { get; set; } = 0.25;
+
     public static AppConfig CreateDefault(bool deployMode)
     {
         var cfg = new AppConfig();

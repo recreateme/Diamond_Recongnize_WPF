@@ -8,6 +8,7 @@ public partial class MainWindow : Window
     public MainWindow(
         MainViewModel vm,
         DiamondDetectViewModel diamondVm,
+        UniformityViewModel uniformityVm,
         DetectionViewModel detectionVm,
         ResultsViewModel resultsVm,
         CorrectionViewModel correctionVm,
@@ -16,6 +17,7 @@ public partial class MainWindow : Window
         InitializeComponent();
         DataContext = vm;
         DiamondViewHost.DataContext = diamondVm;
+        UniformityViewHost.DataContext = uniformityVm;
         DetectViewHost.DataContext = detectionVm;
         ResultsViewHost.DataContext = resultsVm;
         CorrectionViewHost.DataContext = correctionVm;
@@ -26,6 +28,7 @@ public partial class MainWindow : Window
             refreshCorrection: () => correctionVm.Refresh(),
             stopDetection: () => detectionVm.StopBatchCommand.Execute(null),
             stopDiamond: () => diamondVm.StopCommand.Execute(null),
+            stopUniformity: () => uniformityVm.StopCommand.Execute(null),
             stopTrain: () => retrainVm.StopTrainCommand.Execute(null));
 
         Loaded += async (_, _) => await vm.InitializeAsync();

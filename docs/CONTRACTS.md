@@ -18,11 +18,12 @@ WPF 与 `python_core` 必须遵守下列契约，变更时同步更新本文件�
 
 字段名与原 `defect_detect` 一致：
 
-`pt_path`, `onnx_path`, `data_dir`, `corrections_dir`, `use_gpu`, `enable_local_diagnostics`, `yolo_path`, `sahi_device`, `sahi_slice_size`, `sahi_overlap`, `sahi_det_conf`, `sahi_batch_size`, `sahi_crop_padding`, `sahi_output_dir`, `sahi_ios_thresh`, `sahi_min_area_ratio`, `sahi_max_aspect_ratio`, `sahi_edge_filter`, `sahi_edge_margin_px`
+`pt_path`, `onnx_path`, `data_dir`, `corrections_dir`, `use_gpu`, `enable_local_diagnostics`, `yolo_path`, `sahi_device`, `sahi_slice_size`, `sahi_overlap`, `sahi_det_conf`, `sahi_batch_size`, `sahi_crop_padding`, `sahi_output_dir`, `sahi_ios_thresh`, `sahi_min_area_ratio`, `sahi_max_aspect_ratio`, `sahi_edge_filter`, `sahi_edge_margin_px`, `uniformity_conf_threshold`
 
 - 机台包内路径使用**相对路径**（相对应用根目录）。
 - 废弃键 `conf_threshold` 忽略。
 - `enable_local_diagnostics`：默认 `false`；为 `true` 时仅写入本机 `logs/diag.jsonl`，不上传。
+- `uniformity_conf_threshold`：均匀度模块 YOLO `det_conf` 过滤阈值，默认 `0.25`。
 
 ## 检测结果（DetectionResult）
 
@@ -58,12 +59,28 @@ WPF 与 `python_core` 必须遵守下列契约，变更时同步更新本文件�
 
 | 文件 | 说明 |
 |------|------|
-| `detect_boxes.json` / `detect_boxes.csv` | 检测框坐标（与检测用图同分辨率）；完整模式含 `defect_class`、`defect_conf` 列 |
+| `detect_boxes.json` / `detect_boxes.csv` | 检测框坐标（与检测用图同分辨率）；含 `det_conf`（YOLO 检测分）；完整模式另含 `defect_class`、`defect_conf` |
+| `uniformity_scores.json` | 完整模式且运行均匀度后：单图分数 + 元数据（`status`/`conf_filter` 等） |
 | `visualization_classified.jpg` | 完整模式且勾选「保存可视化」且有目标时 |
 | `visualization_detection.jpg` | 仅检测模式且勾选「保存可视化」且有目标时 |
 | `{stem}_detect_input.jpg` | 仅检测且发生下采样时 |
 
+输出根目录另可有：`summary.csv`（完整模式分类汇总）、`uniformity_summary.csv`（均匀度批量汇总）。
+
 不再生成：`crops/`、`result.json`、`statistics.json`、`visualization_detection.jpg`（完整模式）。
+
+## 均匀度分析
+
+| 项 | 约定 |
+|----|------|
+| 实现 | `python_core/diamond_uniformity.py`（Bridge：`IUniformityAnalyzer`） |
+| 输入根 | 产品检测输出根（如 576 子图目录）；UI 扫描后勾选子集（默认全选） |
+| 认文件 | 每子目录优先 `detect_boxes.json`，否则旧版 `result.json` |
+| 排序 | 纯数字子目录名按数值（`1…576`） |
+| 过滤 | `det_conf >= uniformity_conf_threshold`；仅三类朝向；无 `det_conf` 时 `conf_filter=skipped` |
+| 落盘 | `{子图}/uniformity_scores.json`（覆盖）；根目录 `uniformity_summary.csv`（本次勾选行，覆盖） |
+| 可视化 | 可选：`{子图}/uniformity_vis.jpg`（底图+点+凸包+网格密度热力）；点选结果行按需生成；批量默认关、可勾选 |
+| 判定 | **只出连续分数**，不做均匀/不均二分类；无盘级汇总分 |
 
 ## 环境变量
 
