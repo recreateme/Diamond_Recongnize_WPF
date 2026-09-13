@@ -6,11 +6,11 @@ WPF 与 `python_core` 必须遵守下列契约，变更时同步更新本文件�
 
 | 项 | 约定 |
 |----|------|
-| 模型输出 | `class_map.json` / ONNX 仍为 5 类：`局部破损`、`断钻`、`棱边朝上`、`点朝上`、`面朝上` |
-| 应用有效类 | `棱边朝上`、`点朝上`、`面朝上`（排除前两类） |
+| 模型输出 | 现行 `class_map.json` / ONNX 为 **3 类**：`棱边朝上`、`点朝上`、`面朝上`（MobileNetV3-Small，Letterbox `img_size`） |
+| 应用有效类 | 同上三类；加载历史 5 类权重时仍排除「局部破损」「断钻」 |
 | 决策 | 有效类内 softmax argmax；**不使用** `class_thresholds.json` |
-| 引擎对外 `Classes` | 仅 3 个有效类（误分类修正按钮、筛选、状态栏类别数） |
-| `all_scores` | 仅含 3 个有效类 |
+| 引擎对外 `Classes` | 仅有效类（误分类修正按钮、筛选、状态栏类别数） |
+| `all_scores` | 仅含有效类概率 |
 
 实现：`python_core/inference_common.py`（`EXCLUDED_CLASSES` / `decide_class` / `build_result_dict`）。
 
@@ -47,7 +47,13 @@ WPF 与 `python_core` 必须遵守下列契约，变更时同步更新本文件�
 | 图像 | 文件名；汇总行为 `批次合计` |
 | 汇总钻石数 | 该图检出钻石数；汇总行为各图之和 |
 | 棱边朝上 / 点朝上 / 面朝上 | 该图（或批次）各类数量，缺省 0 |
-| 检测耗时(s) / 分类耗时(s) / 总耗时(s) | 单图耗时；汇总行留空 |
+| 检测耗时(s) | SAHI/YOLO 检测墙钟 |
+| 分类预处理(s) | Letterbox 等 CPU 预处理（OpenCV 路径） |
+| 分类推理(s) | 模型 forward（batch） |
+| 分类耗时(s) | 预处理 + 推理合计（兼容旧列语义） |
+| 总耗时(s) | 检测 + 分类；汇总行留空 |
+
+单图耗时列；汇总行（批次合计）时间列留空。
 
 - **仅「检测+分类」完整模式**写入；「仅检测定位」不写（无分类统计）。
 - **仅处理图像数 > 1** 时追加一行 `批次合计`。
@@ -59,7 +65,8 @@ WPF 与 `python_core` 必须遵守下列契约，变更时同步更新本文件�
 
 | 文件 | 说明 |
 |------|------|
-| `detect_boxes.json` / `detect_boxes.csv` | 检测框坐标（与检测用图同分辨率）；含 `det_conf`（YOLO 检测分）；完整模式另含 `defect_class`、`defect_conf` |
+| `detect_boxes.json` / `detect_boxes.csv` | 检测框坐标（与检测用图同分辨率）；含 `det_conf`（YOLO 检测分）；完整模式另含 `defect_class`、`defect_conf`；勾选保存 crop 时含相对路径 `crop_path` |
+| `crop/` | 可选：裁剪切片；完整模式为 `crop/<类别>/NNNN.jpg`；仅检测为 `crop/NNNN.jpg` |
 | `uniformity_scores.json` | 完整模式且运行均匀度后：单图分数 + 元数据（`status`/`conf_filter` 等） |
 | `visualization_classified.jpg` | 完整模式且勾选「保存可视化」且有目标时 |
 | `visualization_detection.jpg` | 仅检测模式且勾选「保存可视化」且有目标时 |
@@ -67,7 +74,7 @@ WPF 与 `python_core` 必须遵守下列契约，变更时同步更新本文件�
 
 输出根目录另可有：`summary.csv`（完整模式分类汇总）、`uniformity_summary.csv`（均匀度批量汇总）。
 
-不再生成：`crops/`、`result.json`、`statistics.json`、`visualization_detection.jpg`（完整模式）。
+默认不写：`result.json`、`statistics.json`；完整模式不写 `visualization_detection.jpg`。
 
 ## 均匀度分析
 

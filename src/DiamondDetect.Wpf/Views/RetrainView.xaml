@@ -5,7 +5,7 @@
         <StackPanel>
             <TextBlock Style="{StaticResource PageTitleStyle}" Text="模型再训练"/>
             <TextBlock Style="{StaticResource PageHintStyle}"
-                       Text="调用 python_core/train.py。机台版默认只读；存在 corrections/ 时自动作为增量数据。"/>
+                       Text="调用 python_core/train.py（MobileNetV3-Small · Letterbox）。机台版默认只读；存在 corrections/ 时自动作为增量数据。早停默认关闭（跑满 epoch）。"/>
 
             <Border Background="#FFF8E1" BorderBrush="#FFE082" BorderThickness="1"
                     CornerRadius="4" Padding="10,8" Margin="0,0,0,12">
@@ -33,15 +33,24 @@
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
-                    <TextBlock Text="图像尺寸 (px)" VerticalAlignment="Center"/>
-                    <TextBox Grid.Column="1" Text="{Binding ImgSize}" Margin="0,4"/>
-                    <TextBlock Grid.Row="1" Text="阶段一 Epochs" VerticalAlignment="Center"/>
-                    <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding EpochsPhase1}" Margin="0,4"/>
-                    <TextBlock Grid.Row="2" Text="阶段二 Epochs" VerticalAlignment="Center"/>
-                    <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding EpochsPhase2}" Margin="0,4"/>
-                    <TextBlock Grid.Row="3" Text="批大小" VerticalAlignment="Center"/>
-                    <TextBox Grid.Row="3" Grid.Column="1" Text="{Binding BatchSize}" Margin="0,4"/>
+                    <TextBlock Text="骨干网络" VerticalAlignment="Center"/>
+                    <TextBlock Grid.Column="1" Text="{Binding ModelArch}" Margin="0,4"
+                               VerticalAlignment="Center" Foreground="#546E7A"/>
+                    <TextBlock Grid.Row="1" Text="图像尺寸 (px)" VerticalAlignment="Center"/>
+                    <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding ImgSize}" Margin="0,4"/>
+                    <TextBlock Grid.Row="2" Text="阶段一 Epochs" VerticalAlignment="Center"/>
+                    <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding EpochsPhase1}" Margin="0,4"/>
+                    <TextBlock Grid.Row="3" Text="阶段二 Epochs" VerticalAlignment="Center"/>
+                    <TextBox Grid.Row="3" Grid.Column="1" Text="{Binding EpochsPhase2}" Margin="0,4"/>
+                    <TextBlock Grid.Row="4" Text="阶段一 LR" VerticalAlignment="Center"/>
+                    <TextBox Grid.Row="4" Grid.Column="1" Text="{Binding LrPhase1}" Margin="0,4"/>
+                    <TextBlock Grid.Row="5" Text="阶段二 LR" VerticalAlignment="Center"/>
+                    <TextBox Grid.Row="5" Grid.Column="1" Text="{Binding LrPhase2}" Margin="0,4"/>
+                    <TextBlock Grid.Row="6" Text="批大小" VerticalAlignment="Center"/>
+                    <TextBox Grid.Row="6" Grid.Column="1" Text="{Binding BatchSize}" Margin="0,4"/>
                 </Grid>
             </GroupBox>
 

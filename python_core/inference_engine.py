@@ -21,17 +21,17 @@ from typing import Callable, Dict, List, Optional, Tuple
 import numpy as np
 import torch
 import torch.nn as nn
-import torchvision.models as models
-import torchvision.transforms as T
 from PIL import Image
 
 from inference_common import (
     active_classes,
     build_torchvision_eval_transform,
     logits_row_to_result,
+    predict_bgr_crops_timed,
     read_model_meta,
     run_batch_predict,
 )
+from model_builder import build_mobilenet_v3_small
 
 try:
     import onnxruntime as ort
@@ -292,24 +292,65 @@ class InferenceEngine:
             should_stop=should_stop,
         )
 
+    def predict_batch_bgr(
+        self,
+        crops_bgr: List[np.ndarray],
+        progress_cb: Optional[Callable[[int, int], None]] = None,
+        result_cb: Optional[Callable[[int, Dict], None]] = None,
+        batch_size: Optional[int] = None,
+        should_stop: Optional[Callable[[], bool]] = None,
+        timing_out: Optional[Dict[str, float]] = None,
+    ) -> List[Dict]:
+        """
+        OpenCV BGR 裁剪批量推理（SAHI 高速路径，无 PIL）。
+        timing_out 可选写入 preprocess_s / infer_s。
+        """
+        if not self.loaded:
+            raise RuntimeError("模型未加载，请先在「设置」页面加载模型。")
+        bs = batch_size or self._batch_size
+
+        if self.backend == "onnx":
+            session = self.ort_session
+            input_name = self._input_name
+            return predict_bgr_crops_timed(
+                crops_bgr,
+                img_size=self.img_size,
+                batch_size=bs,
+                stack_batch=lambda ts: np.stack(ts, axis=0).astype(np.float32, copy=False),
+                infer_batch=lambda batch: session.run(None, {input_name: batch})[0],
+                classes=self._model_classes,
+                thr_vec=None,
+                progress_cb=progress_cb,
+                result_cb=result_cb,
+                should_stop=should_stop,
+                timing_out=timing_out,
+            )
+
+        model = self.model
+        device = self.device
+
+        def _to_torch(chw: np.ndarray) -> torch.Tensor:
+            return torch.from_numpy(chw)
+
+        return predict_bgr_crops_timed(
+            crops_bgr,
+            img_size=self.img_size,
+            batch_size=bs,
+            stack_batch=lambda ts: torch.stack(ts).to(device),
+            infer_batch=lambda batch: model(batch).detach().cpu().numpy(),
+            classes=self._model_classes,
+            thr_vec=None,
+            progress_cb=progress_cb,
+            result_cb=result_cb,
+            should_stop=should_stop,
+            timing_out=timing_out,
+            to_model_tensor=_to_torch,
+        )
+
     def _preprocess(self, image_path: str) -> torch.Tensor:
         with Image.open(image_path) as im:
             return self.transform(im.convert("RGB")).unsqueeze(0)
 
     @staticmethod
     def _build_model(num_classes: int) -> nn.Module:
-        try:
-            m = models.efficientnet_b0(weights=None)
-            in_f = m.classifier[1].in_features
-            m.classifier = nn.Sequential(
-                nn.Dropout(p=0.3, inplace=True),
-                nn.Linear(in_f, num_classes),
-            )
-        except AttributeError:
-            m = models.resnet18(weights=None)
-            in_f = m.fc.in_features
-            m.fc = nn.Sequential(
-                nn.Dropout(p=0.3),
-                nn.Linear(in_f, num_classes),
-            )
-        return m
+        return build_mobilenet_v3_small(num_classes, pretrained=False)

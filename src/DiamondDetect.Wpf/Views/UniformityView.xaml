@@ -89,13 +89,18 @@
                           IsReadOnly="True" RowHeight="28">
                     <DataGrid.Columns>
                         <DataGridTextColumn Header="图像" Binding="{Binding Image}" Width="SizeToCells"/>
-                        <DataGridTextColumn Header="n_points" Binding="{Binding NPointsText}" Width="64"/>
-                        <DataGridTextColumn Header="voronoi_cv_n" Binding="{Binding VoronoiText}" Width="90"/>
-                        <DataGridTextColumn Header="nn_cv_n" Binding="{Binding NnText}" Width="80"/>
-                        <DataGridTextColumn Header="clark_evans_R" Binding="{Binding ClarkEvansText}" Width="90"/>
-                        <DataGridTextColumn Header="delaunay_cv_n" Binding="{Binding DelaunayText}" Width="90"/>
-                        <DataGridTextColumn Header="grid_cv" Binding="{Binding GridText}" Width="70"/>
-                        <DataGridTextColumn Header="status" Binding="{Binding Status}" Width="100"/>
+                        <DataGridTextColumn Header="钻石数" Binding="{Binding NPointsText}" Width="60"/>
+                        <DataGridTextColumn Header="Voronoi均匀度%" Binding="{Binding VoronoiCuText}" Width="110"/>
+                        <DataGridTextColumn Header="Voronoi面积CV" Binding="{Binding VoronoiText}" Width="100"/>
+                        <DataGridTextColumn Header="间距均匀度%" Binding="{Binding NnCuText}" Width="90"/>
+                        <DataGridTextColumn Header="最近邻CV" Binding="{Binding NnText}" Width="80"/>
+                        <DataGridTextColumn Header="规则度R" Binding="{Binding ClarkEvansText}" Width="80"/>
+                        <DataGridTextColumn Header="三角网均匀度%" Binding="{Binding DelaunayCuText}" Width="100"/>
+                        <DataGridTextColumn Header="Delaunay边长CV" Binding="{Binding DelaunayText}" Width="105"/>
+                        <DataGridTextColumn Header="区域均匀度%" Binding="{Binding GridCuText}" Width="90"/>
+                        <DataGridTextColumn Header="最差区域均匀度%" Binding="{Binding GridDuLqText}" Width="110"/>
+                        <DataGridTextColumn Header="区域密度CV" Binding="{Binding GridText}" Width="85"/>
+                        <DataGridTextColumn Header="状态" Binding="{Binding Status}" Width="100"/>
                     </DataGrid.Columns>
                 </DataGrid>
             </GroupBox>

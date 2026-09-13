@@ -10,7 +10,7 @@ DLL 搜索统一走 app_paths.setup_ort_dll_paths()（冻结环境另有 rthook 
 性能要点：
   · Session 图优化 (ORT_ENABLE_ALL)
   · 批量推理：多张图一次 session.run，显著降低 GPU 启动开销
-  · 预处理：与 train val 一致的 Resize(img_size)（load 时缓存尺寸）；归一化用 float32
+  · 预处理：与 train val 一致的 Letterbox(img_size)（load 时缓存尺寸）；归一化用 float32
   · 有效类别 argmax 在 load 时确定，推理时排除已废弃类别
 
 批量循环与 logits→结果 转换见 inference_common（与开发版 ONNX 回退共用，避免逻辑漂移）。
@@ -29,6 +29,7 @@ from PIL import Image
 from inference_common import (
     active_classes,
     logits_row_to_result,
+    predict_bgr_crops_timed,
     preprocess_rgb_to_chw,
     read_model_meta,
     run_batch_predict,
@@ -331,6 +332,34 @@ class InferenceEngine:
             progress_cb=progress_cb,
             result_cb=result_cb,
             should_stop=should_stop,
+        )
+
+    def predict_batch_bgr(
+        self,
+        crops_bgr: List[np.ndarray],
+        progress_cb: Optional[Callable[[int, int], None]] = None,
+        result_cb: Optional[Callable[[int, Dict], None]] = None,
+        batch_size: Optional[int] = None,
+        should_stop: Optional[Callable[[], bool]] = None,
+        timing_out: Optional[Dict[str, float]] = None,
+    ) -> List[Dict]:
+        """OpenCV BGR 裁剪批量推理（SAHI 高速路径）；timing_out 写 preprocess_s/infer_s。"""
+        if not self.loaded:
+            raise RuntimeError("模型未加载，请先在「设置」页面加载模型。")
+        session = self.ort_session
+        input_name = self._input_name
+        return predict_bgr_crops_timed(
+            crops_bgr,
+            img_size=self.img_size,
+            batch_size=batch_size or self._batch_size,
+            stack_batch=lambda ts: np.stack(ts, axis=0).astype(np.float32, copy=False),
+            infer_batch=lambda batch: session.run(None, {input_name: batch})[0],
+            classes=self._model_classes,
+            thr_vec=None,
+            progress_cb=progress_cb,
+            result_cb=result_cb,
+            should_stop=should_stop,
+            timing_out=timing_out,
         )
 
     def _preprocess(self, image_path: str) -> np.ndarray:

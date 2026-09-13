@@ -89,7 +89,9 @@ public sealed class PythonSahiPipeline : ISahiPipeline
                     downsample_enabled: options.DownsampleEnabled,
                     downsample_max_side: options.DownsampleMaxSide,
                     downsample_interpolation: options.DownsampleInterpolation ?? "area",
-                    save_visualization: options.SaveVisualization);
+                    save_visualization: options.SaveVisualization,
+                    save_crops: options.SaveCrops,
+                    crop_padding: options.CropPadding);
             }
             else
             {
@@ -98,7 +100,8 @@ public sealed class PythonSahiPipeline : ISahiPipeline
                     _classifier!.NativeEngine,
                     options.OutputDir,
                     options.CropPadding,
-                    save_visualization: options.SaveVisualization);
+                    save_visualization: options.SaveVisualization,
+                    save_crops: options.SaveCrops);
             }
 
             var cancelBridge = new CancellationBridge(cancellationToken);
@@ -182,6 +185,8 @@ public sealed class PythonSahiPipeline : ISahiPipeline
             Image = GetStr(raw, "image"),
             TotalDiamonds = (int)GetDouble(raw, "total_diamonds"),
             DetectionTimeS = GetDouble(raw, "detection_time_s"),
+            ClassificationPreprocessTimeS = GetDouble(raw, "classification_preprocess_time_s"),
+            ClassificationInferTimeS = GetDouble(raw, "classification_infer_time_s"),
             ClassificationTimeS = GetDouble(raw, "classification_time_s"),
             TotalTimeS = GetDouble(raw, "total_time_s"),
             OutputDir = GetStr(raw, "output_dir"),

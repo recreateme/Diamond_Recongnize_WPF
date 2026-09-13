@@ -235,11 +235,9 @@ def recommend_resolution(df: pd.DataFrame) -> dict:
     print(f"\n  分析依据 :")
     print(f"    {reason}")
     print(f"\n  附加建议 :")
-    print(f"    · Resize 策略 : 等比缩放至短边 = 目标尺寸，再中心裁剪")
-    print(f"    · 若缺陷常出现在边缘，改用 Letterbox Padding 保留全图")
-    print(f"    · EfficientNet-B0 原生尺寸 224×224，上述推荐可直接传入")
-    print(f"      transforms.Resize((res_h, res_w))")
-    print(f"    · 如后续选择 EfficientNet-B2/B4，可相应上调至 260 / 380")
+    print(f"    · 当前分类骨干为 MobileNetV3-Small，推荐 --img_size 取上表建议值（常用 256）")
+    print(f"    · 训练/推理统一 Letterbox（等比缩放 + 黑边 pad），勿拉伸畸变")
+    print(f"    · 若短边 P90 远小于推荐值，可适当下调以节省显存")
 
     return rec
 

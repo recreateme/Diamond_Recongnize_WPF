@@ -52,9 +52,10 @@ public partial class DiamondDetectViewModel : ObservableObject
         new[] { "area", "linear", "cubic", "nearest" };
 
     [ObservableProperty] private string pageHintText =
-        "大图 SAHI 切片检测 + 缺陷分类。可选「仅检测定位」输出坐标 JSON/CSV；「输出选项」可保存可视化图。";
+        "大图 SAHI 切片检测 + 缺陷分类。可选「仅检测定位」；「输出选项」可保存可视化图与 crop/ 裁剪切片。";
     [ObservableProperty] private bool detectOnly;
     [ObservableProperty] private bool saveVisualization;
+    [ObservableProperty] private bool saveCrops;
     [ObservableProperty] private bool runUniformityAfter;
     [ObservableProperty] private bool downsampleEnabled;
     [ObservableProperty] private int downsampleMaxSide = 2560;
@@ -179,6 +180,7 @@ public partial class DiamondDetectViewModel : ObservableObject
                 ? "area"
                 : SelectedInterpolation.Trim(),
             SaveVisualization = SaveVisualization,
+            SaveCrops = SaveCrops,
         };
 
         var progress = new Progress<SahiProgress>(p =>

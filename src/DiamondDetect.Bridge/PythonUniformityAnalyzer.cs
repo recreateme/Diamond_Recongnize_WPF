@@ -193,6 +193,14 @@ public sealed class PythonUniformityAnalyzer : IUniformityAnalyzer
             GridDensityCv = GetNullableDouble(raw, "grid_density_cv"),
             Status = GetStr(raw, "status"),
             ConfFilter = GetStr(raw, "conf_filter"),
+            VoronoiAreaCu = GetNullableDouble(raw, "voronoi_area_cu"),
+            VoronoiAreaDuLq = GetNullableDouble(raw, "voronoi_area_du_lq"),
+            NnDistanceCu = GetNullableDouble(raw, "nn_distance_cu"),
+            NnDistanceDuLq = GetNullableDouble(raw, "nn_distance_du_lq"),
+            DelaunayEdgeCu = GetNullableDouble(raw, "delaunay_edge_cu"),
+            DelaunayEdgeDuLq = GetNullableDouble(raw, "delaunay_edge_du_lq"),
+            GridDensityCu = GetNullableDouble(raw, "grid_density_cu"),
+            GridDensityDuLq = GetNullableDouble(raw, "grid_density_du_lq"),
         };
     }
 

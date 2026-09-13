@@ -34,3 +34,6 @@ scripts/.idea/
 # app_config.json may contain absolute yolo paths; review before commit
 # Prefer committing app_config.deploy.json as the machine template
 /detect_weights/*.pt
+
+# Large local pretrained weights (copy from torchvision / download cache)
+/checkpoints/pretrained/*.pth

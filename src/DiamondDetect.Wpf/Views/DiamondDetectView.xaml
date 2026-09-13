@@ -5,76 +5,96 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto" MaxHeight="360"/>
             <RowDefinition Height="Auto"/>
-            <RowDefinition Height="*" MinHeight="220"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*" MinHeight="200"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
         <TextBlock Grid.Row="0" Style="{StaticResource PageTitleStyle}" Text="钻石检测分类"/>
         <TextBlock Grid.Row="1" Style="{StaticResource PageHintStyle}" Text="{Binding PageHintText}"/>
 
-        <!-- 配置区：窗口较矮时可滚动 -->
-        <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto" Margin="0,0,0,8">
-            <StackPanel>
-                <GroupBox Header="处理模式" Margin="0,0,0,10" Padding="10">
-                    <StackPanel>
-                        <CheckBox Content="仅检测定位（不分类，输出 detect_boxes.json / .csv）"
-                                  IsChecked="{Binding DetectOnly}" Margin="0,0,0,8"/>
-                        <StackPanel Orientation="Horizontal" IsEnabled="{Binding DetectOnly}">
-                            <CheckBox Content="检测前下采样（最长边缩至" VerticalAlignment="Center"
-                                      IsChecked="{Binding DownsampleEnabled}" Margin="0,0,4,0"/>
-                            <TextBox Width="56" VerticalAlignment="Center" Margin="0,0,4,0"
-                                     Text="{Binding DownsampleMaxSide, UpdateSourceTrigger=PropertyChanged}"/>
-                            <TextBlock Text="px）" VerticalAlignment="Center" Margin="0,0,16,0"/>
-                            <TextBlock Text="插值：" VerticalAlignment="Center" Margin="0,0,6,0"/>
-                            <ComboBox Width="120" VerticalAlignment="Center"
-                                      ItemsSource="{Binding InterpolationOptions}"
-                                      SelectedItem="{Binding SelectedInterpolation}"/>
-                        </StackPanel>
-                    </StackPanel>
-                </GroupBox>
+        <!-- 模式 / 输出并排，降低纵向高度，避免底部「结果保存目录」被裁切 -->
+        <Grid Grid.Row="2" Margin="0,0,0,10">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" MinWidth="260"/>
+                <ColumnDefinition Width="12"/>
+                <ColumnDefinition Width="*" MinWidth="260"/>
+            </Grid.ColumnDefinitions>
 
-                <GroupBox Header="输出选项" Margin="0,0,0,10" Padding="10">
-                    <StackPanel>
-                        <CheckBox Content="保存可视化结果（检测+分类：分类着色图；仅检测：绿框检测图）"
-                                  IsChecked="{Binding SaveVisualization}" Margin="0,0,0,8"/>
-                        <CheckBox Content="完成后计算均匀度（完整模式；写入 uniformity_scores.json / uniformity_summary.csv）"
-                                  IsChecked="{Binding RunUniformityAfter}"
-                                  IsEnabled="{Binding DetectOnly, Converter={StaticResource InvertBool}}"/>
-                    </StackPanel>
-                </GroupBox>
+            <GroupBox Grid.Column="0" Header="处理模式" Padding="10">
+                <StackPanel>
+                    <CheckBox Content="仅检测定位（不分类）"
+                              IsChecked="{Binding DetectOnly}" Margin="0,0,0,8"
+                              ToolTip="只输出 detect_boxes.json / .csv，不跑朝向分类"/>
+                    <WrapPanel Orientation="Horizontal" IsEnabled="{Binding DetectOnly}">
+                        <CheckBox Content="检测前下采样，最长边"
+                                  VerticalAlignment="Center"
+                                  IsChecked="{Binding DownsampleEnabled}" Margin="0,0,4,4"
+                                  ToolTip="源图更长边缩到右侧像素；仅「仅检测定位」可用"/>
+                        <TextBox Width="56" VerticalAlignment="Center" Margin="0,0,4,4"
+                                 Text="{Binding DownsampleMaxSide, UpdateSourceTrigger=PropertyChanged}"/>
+                        <TextBlock Text="px" VerticalAlignment="Center" Margin="0,0,12,4"/>
+                        <TextBlock Text="插值" VerticalAlignment="Center" Margin="0,0,6,4"/>
+                        <ComboBox Width="100" VerticalAlignment="Center" Margin="0,0,0,4"
+                                  ItemsSource="{Binding InterpolationOptions}"
+                                  SelectedItem="{Binding SelectedInterpolation}"/>
+                    </WrapPanel>
+                </StackPanel>
+            </GroupBox>
 
-                <GroupBox Header="输入图像" Margin="0,0,0,10" Padding="10">
-                    <DockPanel>
-                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="12,0,0,0">
-                            <Button Content="选择文件" Width="96" Height="34" Margin="0,0,8,0"
-                                    Command="{Binding BrowseFilesCommand}"/>
-                            <Button Content="选择文件夹" Width="96" Height="34"
-                                    Command="{Binding BrowseFolderCommand}"/>
-                        </StackPanel>
-                        <StackPanel>
-                            <TextBlock Text="{Binding InputPathText}" TextWrapping="Wrap" FontSize="15"
-                                       FontWeight="SemiBold" Foreground="#37474F" MinHeight="48"/>
-                            <TextBlock Text="{Binding ImageCountText}" Foreground="#546E7A" FontSize="12"
-                                       Margin="0,4,0,0"/>
-                        </StackPanel>
-                    </DockPanel>
-                </GroupBox>
+            <GroupBox Grid.Column="2" Header="输出选项" Padding="10">
+                <StackPanel>
+                    <CheckBox Content="保存可视化结果" Margin="0,0,0,8"
+                              IsChecked="{Binding SaveVisualization}"
+                              ToolTip="完整模式：分类着色图；仅检测：绿框检测图"/>
+                    <CheckBox Content="保存裁剪切片 crop/" Margin="0,0,0,8"
+                              IsChecked="{Binding SaveCrops}"
+                              ToolTip="完整模式按类别分子目录；仅检测为平铺编号图"/>
+                    <CheckBox Content="完成后计算均匀度"
+                              IsChecked="{Binding RunUniformityAfter}"
+                              IsEnabled="{Binding DetectOnly, Converter={StaticResource InvertBool}}"
+                              ToolTip="仅完整模式；写入 uniformity_scores.json / uniformity_summary.csv"/>
+                </StackPanel>
+            </GroupBox>
+        </Grid>
 
-                <GroupBox Header="结果保存目录" Padding="10">
-                    <DockPanel>
-                        <Button DockPanel.Dock="Right" Content="选择目录" Width="96" Height="34" Margin="10,0,0,0"
-                                Command="{Binding BrowseOutputCommand}"/>
-                        <TextBox Text="{Binding OutputDir, UpdateSourceTrigger=PropertyChanged}"
-                                 VerticalContentAlignment="Center"/>
-                    </DockPanel>
-                </GroupBox>
-            </StackPanel>
-        </ScrollViewer>
+        <GroupBox Grid.Row="3" Header="输入图像" Margin="0,0,0,10" Padding="10">
+            <DockPanel LastChildFill="True">
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="12,0,0,0">
+                    <Button Content="选择文件" Width="96" Height="34" Margin="0,0,8,0"
+                            Command="{Binding BrowseFilesCommand}"/>
+                    <Button Content="选择文件夹" Width="96" Height="34"
+                            Command="{Binding BrowseFolderCommand}"/>
+                </StackPanel>
+                <StackPanel>
+                    <TextBlock Text="{Binding InputPathText}"
+                               TextWrapping="Wrap"
+                               FontSize="14" FontWeight="SemiBold" Foreground="#37474F"
+                               MinHeight="34" VerticalAlignment="Center"
+                               ToolTip="{Binding InputPathText}"/>
+                    <TextBlock Text="{Binding ImageCountText}" Foreground="#546E7A" FontSize="12"
+                               Margin="0,4,0,0"/>
+                </StackPanel>
+            </DockPanel>
+        </GroupBox>
 
-        <!-- 控制与进度：始终可见 -->
-        <StackPanel Grid.Row="3" Margin="0,0,0,8">
+        <GroupBox Grid.Row="4" Header="结果保存目录" Margin="0,0,0,10" Padding="10">
+            <DockPanel LastChildFill="True">
+                <Button DockPanel.Dock="Right" Content="选择目录" MinWidth="96" Height="34"
+                        Margin="12,0,0,0" Padding="12,0"
+                        Command="{Binding BrowseOutputCommand}"/>
+                <TextBox Text="{Binding OutputDir, UpdateSourceTrigger=PropertyChanged}"
+                         MinHeight="34" Height="34"
+                         VerticalContentAlignment="Center"
+                         HorizontalScrollBarVisibility="Auto"
+                         ToolTip="{Binding OutputDir}"/>
+            </DockPanel>
+        </GroupBox>
+
+        <StackPanel Grid.Row="5" Margin="0,0,0,8">
             <DockPanel Margin="0,0,0,8">
                 <Button Style="{StaticResource PrimaryButtonStyle}" Content="开始处理" Height="36"
                         Command="{Binding RunCommand}"
@@ -92,7 +112,7 @@
                        Visibility="{Binding StageVisible, Converter={StaticResource BoolToVis}}"/>
         </StackPanel>
 
-        <GroupBox Grid.Row="4" Header="结果统计" Padding="8">
+        <GroupBox Grid.Row="6" Header="结果统计" Padding="8">
             <DataGrid ItemsSource="{Binding Rows}"
                       Style="{StaticResource VirtualizedDataGridStyle}"
                       IsReadOnly="True" RowHeight="28">
@@ -101,12 +121,12 @@
                     <DataGridTextColumn Header="钻石数" Binding="{Binding DiamondsText}" Width="70"/>
                     <DataGridTextColumn Header="缺陷类别分布" Binding="{Binding Distribution}" Width="*"/>
                     <DataGridTextColumn Header="总耗时(s)" Binding="{Binding TimeText}" Width="90"/>
-                    <DataGridTextColumn Header="保存目录" Binding="{Binding OutputDir}" Width="SizeToCells"/>
+                    <DataGridTextColumn Header="保存目录" Binding="{Binding OutputDir}" Width="2*"/>
                 </DataGrid.Columns>
             </DataGrid>
         </GroupBox>
 
-        <TextBlock Grid.Row="5" Text="{Binding TotalText}"
+        <TextBlock Grid.Row="7" Text="{Binding TotalText}"
                    Foreground="#1565C0" FontSize="16" FontWeight="Bold" Margin="0,8,0,0"/>
     </Grid>
 </UserControl>

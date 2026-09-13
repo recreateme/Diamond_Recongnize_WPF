@@ -4,9 +4,10 @@
 推理公共模块 — 开发版 (inference_engine) 与机台版 (inference_engine_onnx) 共用。
 
 集中放置：
+  · Letterbox（OpenCV，训练/推理一致）与 BGR 裁剪高速预处理
   · 元数据读取（类别 / img_size）
   · Softmax 与有效类别 argmax 决策（排除已废弃类别）
-  · run_batch_predict — 通用批量推理循环
+  · run_batch_predict / predict_bgr_crops_timed — 批量推理（可拆预处理/推理耗时）
   · logits_row_to_result / build_result_dict — 单张/批量统一结果结构
   · ImageNet 归一化常量
 
@@ -16,6 +17,7 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -28,8 +30,11 @@ IMAGENET_STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
 IMAGENET_MEAN_LIST = [0.485, 0.456, 0.406]
 IMAGENET_STD_LIST = [0.229, 0.224, 0.225]
 
-# 模型仍输出 5 类 logits，应用层不再使用以下类别
+# 历史 5 类模型中已废弃的类别；真 3 类模型不含这些名，集合为空兼容
 EXCLUDED_CLASSES = frozenset({"局部破损", "断钻"})
+
+# SAHI 裁剪 letterbox 并行线程数（cv2 段可释放 GIL）
+_PREPROCESS_WORKERS = max(1, min(8, (os.cpu_count() or 4)))
 
 
 def active_classes(model_classes: List[str]) -> List[str]:
@@ -42,16 +47,119 @@ def active_class_indices(model_classes: List[str]) -> List[int]:
     return [i for i, c in enumerate(model_classes) if c not in EXCLUDED_CLASSES]
 
 
+class LetterboxToSquare:
+    """等比缩放后居中 pad 到 size×size（默认黑边），训练/验证/推理共用。
+
+    几何用 OpenCV（与 letterbox_rgb_u8_to_chw 一致），输出仍为 PIL 以便接增强。
+    """
+
+    def __init__(self, size: int, fill: int = 0):
+        self.size = int(size)
+        self.fill = int(fill)
+
+    def __call__(self, img):
+        from PIL import Image as PILImage
+
+        if getattr(img, "mode", None) != "RGB":
+            img = img.convert("RGB")
+        arr = np.asarray(img)
+        if arr.dtype != np.uint8:
+            arr = np.clip(arr, 0, 255).astype(np.uint8)
+        import cv2
+
+        h, w = int(arr.shape[0]), int(arr.shape[1])
+        if w <= 0 or h <= 0:
+            raise ValueError(f"invalid image size: {w}x{h}")
+        scale = min(self.size / w, self.size / h)
+        nw = max(1, int(round(w * scale)))
+        nh = max(1, int(round(h * scale)))
+        resized = cv2.resize(arr, (nw, nh), interpolation=cv2.INTER_LINEAR)
+        canvas = np.full((self.size, self.size, 3), self.fill, dtype=np.uint8)
+        left = (self.size - nw) // 2
+        top = (self.size - nh) // 2
+        canvas[top : top + nh, left : left + nw] = resized
+        return PILImage.fromarray(canvas)
+
+
+def letterbox_rgb_u8_to_chw(
+    rgb: np.ndarray,
+    img_size: int,
+    fill: int = 0,
+) -> np.ndarray:
+    """
+    RGB uint8 HWC → CHW float32（ImageNet 归一化）。
+    几何语义与 LetterboxToSquare 一致（等比缩放 + 居中黑边）。
+    """
+    import cv2
+
+    if rgb.ndim != 3 or rgb.shape[2] != 3:
+        raise ValueError(f"expect HWC RGB, got shape={getattr(rgb, 'shape', None)}")
+    h, w = int(rgb.shape[0]), int(rgb.shape[1])
+    if w <= 0 or h <= 0:
+        raise ValueError(f"invalid image size: {w}x{h}")
+    size = int(img_size)
+    scale = min(size / w, size / h)
+    nw = max(1, int(round(w * scale)))
+    nh = max(1, int(round(h * scale)))
+    resized = cv2.resize(rgb, (nw, nh), interpolation=cv2.INTER_LINEAR)
+    canvas = np.full((size, size, 3), int(fill), dtype=np.uint8)
+    left = (size - nw) // 2
+    top = (size - nh) // 2
+    canvas[top : top + nh, left : left + nw] = resized
+    arr = canvas.astype(np.float32) * (1.0 / 255.0)
+    arr = (arr - IMAGENET_MEAN.reshape(1, 1, 3)) / IMAGENET_STD.reshape(1, 1, 3)
+    return arr.transpose(2, 0, 1)
+
+
+def letterbox_bgr_u8_to_chw(
+    bgr: np.ndarray,
+    img_size: int,
+    fill: int = 0,
+) -> np.ndarray:
+    """OpenCV BGR 裁剪 → CHW float32（内部转 RGB 后 letterbox）。"""
+    import cv2
+
+    rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+    return letterbox_rgb_u8_to_chw(rgb, img_size, fill)
+
+
+def preprocess_bgr_crops_to_chw(
+    crops_bgr: List[np.ndarray],
+    img_size: int,
+    *,
+    workers: Optional[int] = None,
+) -> Tuple[List[np.ndarray], float]:
+    """
+    批量 BGR 裁剪 → CHW 列表；返回 (tensors, preprocess_wall_s)。
+    workers>1 时用线程池并行 letterbox。
+    """
+    n = len(crops_bgr)
+    if n == 0:
+        return [], 0.0
+    n_workers = _PREPROCESS_WORKERS if workers is None else max(1, int(workers))
+    t0 = time.perf_counter()
+    if n_workers <= 1 or n < 4:
+        tensors = [letterbox_bgr_u8_to_chw(c, img_size) for c in crops_bgr]
+    else:
+        from concurrent.futures import ThreadPoolExecutor
+
+        with ThreadPoolExecutor(max_workers=min(n_workers, n)) as ex:
+            tensors = list(
+                ex.map(lambda c: letterbox_bgr_u8_to_chw(c, img_size), crops_bgr)
+            )
+    return tensors, time.perf_counter() - t0
+
+
 def build_torchvision_eval_transform(img_size: int):
     """
     训练验证 / 推理共用的 eval 预处理（与 train.get_transforms 的 val_tf 一致）。
 
-    仅 Resize 铺满 img_size，不做 +16 CenterCrop，避免训练/推理分叉。
+    Letterbox → ToTensor → ImageNet Normalize；禁止与推理分叉的 CenterCrop。
     """
     import torchvision.transforms as T
 
     return T.Compose([
-        T.Resize((img_size, img_size)),
+        LetterboxToSquare(img_size),
         T.ToTensor(),
         T.Normalize(mean=IMAGENET_MEAN_LIST, std=IMAGENET_STD_LIST),
     ])
@@ -59,17 +167,14 @@ def build_torchvision_eval_transform(img_size: int):
 
 def preprocess_rgb_to_chw(img, img_size: int) -> np.ndarray:
     """
-    PIL RGB → CHW float32（归一化），与 build_torchvision_eval_transform 空间语义一致。
-    供 ONNX 引擎与对照脚本使用，避免各处手写 resize/crop。
+    PIL RGB → CHW float32（归一化），与 LetterboxToSquare / OpenCV letterbox 语义一致。
     """
-    from PIL import Image as PILImage
-
-    if getattr(img, "mode", None) != "RGB":
+    if getattr(img, "mode", None) is not None and img.mode != "RGB":
         img = img.convert("RGB")
-    img = img.resize((int(img_size), int(img_size)), PILImage.BILINEAR)
-    arr = np.asarray(img, dtype=np.float32) / 255.0
-    arr = (arr - IMAGENET_MEAN.reshape(1, 1, 3)) / IMAGENET_STD.reshape(1, 1, 3)
-    return arr.transpose(2, 0, 1)
+    arr = np.asarray(img)
+    if arr.dtype != np.uint8:
+        arr = np.clip(arr, 0, 255).astype(np.uint8)
+    return letterbox_rgb_u8_to_chw(arr, int(img_size))
 
 
 def read_model_meta(
@@ -316,3 +421,98 @@ def run_batch_predict(
         r if r is not None else make_error_result(str(p), "未知错误")
         for r, p in zip(results, image_paths)
     ]
+
+
+def run_batch_infer_chw(
+    chw_list: List[Any],
+    *,
+    batch_size: int,
+    stack_batch: Callable[[List[Any]], Any],
+    infer_batch: Callable[[Any], np.ndarray],
+    classes: List[str],
+    thr_vec: Optional[np.ndarray],
+    progress_cb: Optional[Callable[[int, int], None]] = None,
+    result_cb: Optional[Callable[[int, Dict], None]] = None,
+    should_stop: Optional[Callable[[], bool]] = None,
+    paths: Optional[List[str]] = None,
+) -> Tuple[List[Dict], float]:
+    """
+    已预处理 CHW 张量的批量推理。返回 (results, infer_wall_s)。
+    infer_wall 仅含 stack + forward。
+    """
+    total = len(chw_list)
+    if paths is None:
+        paths = [f"mem:{i}" for i in range(total)]
+    results: List[Optional[Dict]] = [None] * total
+    infer_s = 0.0
+
+    for start in range(0, total, batch_size):
+        if should_stop and should_stop():
+            break
+        end = min(start + batch_size, total)
+        chunk = chw_list[start:end]
+        t0 = time.perf_counter()
+        logits = infer_batch(stack_batch(chunk))
+        chunk_s = time.perf_counter() - t0
+        infer_s += chunk_s
+        scores = softmax_batch(np.asarray(logits))
+        per_ms = (chunk_s * 1000.0) / max(1, len(chunk))
+        for j, idx in enumerate(range(start, end)):
+            r = build_result_dict(
+                str(paths[idx]), scores[j], classes, thr_vec, elapsed_ms=per_ms,
+            )
+            results[idx] = r
+            if result_cb:
+                result_cb(idx, r)
+            if progress_cb:
+                progress_cb(idx + 1, total)
+
+    return (
+        [
+            r if r is not None else make_error_result(str(p), "未知错误")
+            for r, p in zip(results, paths)
+        ],
+        infer_s,
+    )
+
+
+def predict_bgr_crops_timed(
+    crops_bgr: List[np.ndarray],
+    *,
+    img_size: int,
+    batch_size: int,
+    stack_batch: Callable[[List[Any]], Any],
+    infer_batch: Callable[[Any], np.ndarray],
+    classes: List[str],
+    thr_vec: Optional[np.ndarray] = None,
+    progress_cb: Optional[Callable[[int, int], None]] = None,
+    result_cb: Optional[Callable[[int, Dict], None]] = None,
+    should_stop: Optional[Callable[[], bool]] = None,
+    timing_out: Optional[Dict[str, float]] = None,
+    to_model_tensor: Optional[Callable[[np.ndarray], Any]] = None,
+) -> List[Dict]:
+    """
+    SAHI 裁剪高速路径：OpenCV letterbox（可并行）→ 批量推理。
+    timing_out 写入 preprocess_s / infer_s（秒）。
+    to_model_tensor: 可选，将单个 CHW numpy 转为引擎张量（如 torch.Tensor）。
+    """
+    chw_np, pre_s = preprocess_bgr_crops_to_chw(crops_bgr, img_size)
+    if to_model_tensor is not None:
+        chw_list: List[Any] = [to_model_tensor(x) for x in chw_np]
+    else:
+        chw_list = chw_np
+    results, infer_s = run_batch_infer_chw(
+        chw_list,
+        batch_size=batch_size,
+        stack_batch=stack_batch,
+        infer_batch=infer_batch,
+        classes=classes,
+        thr_vec=thr_vec,
+        progress_cb=progress_cb,
+        result_cb=result_cb,
+        should_stop=should_stop,
+    )
+    if timing_out is not None:
+        timing_out["preprocess_s"] = float(pre_s)
+        timing_out["infer_s"] = float(infer_s)
+    return results

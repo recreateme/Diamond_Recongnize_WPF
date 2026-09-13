@@ -1,20 +1,23 @@
 {
-  "project_root": "D:\\工作记录\\3 人工智能相关课题\\张旭\\defects_classify",
-  "data_dir": "D:\\工作记录\\3 人工智能相关课题\\张旭\\defects_classify\\data",
-  "img_size": 128,
-  "num_classes": 5,
+  "project_root": "D:\\Develop\\diamond_detect_wpf\\python_core",
+  "data_dir": "D:\\Develop\\diamond_detect_wpf\\data",
+  "img_size": 256,
+  "num_classes": 3,
   "classes": [
-    "局部破损",
-    "断钻",
     "棱边朝上",
     "点朝上",
     "面朝上"
   ],
-  "best_val_acc": 0.949612,
-  "best_macro_f1": 0.901655,
-  "model_arch": "efficientnet_b0",
+  "best_val_acc": 0.723214,
+  "best_macro_f1": 0.586463,
+  "model_arch": "mobilenet_v3_small",
   "use_focal_loss": true,
   "use_class_weight": true,
   "focal_gamma": 2.0,
+  "lr_phase1": 0.001,
+  "lr_phase2": 1e-05,
+  "epochs_phase1": 10,
+  "epochs_phase2": 50,
+  "patience": 0,
   "resumed_from": null
 }

@@ -23,7 +23,7 @@ public static class SahiSummaryCsv
       var sb = new StringBuilder();
       sb.Append("图像,汇总钻石数,");
       sb.Append(string.Join(",", ClassColumns));
-      sb.AppendLine(",检测耗时(s),分类耗时(s),总耗时(s)");
+      sb.AppendLine(",检测耗时(s),分类预处理(s),分类推理(s),分类耗时(s),总耗时(s)");
 
       var classTotals = new int[ClassColumns.Length];
       var diamondTotal = 0;
@@ -40,6 +40,8 @@ public static class SahiSummaryCsv
         }
         sb.Append(',')
           .Append(s.DetectionTimeS.ToString("0.###", CultureInfo.InvariantCulture)).Append(',')
+          .Append(s.ClassificationPreprocessTimeS.ToString("0.###", CultureInfo.InvariantCulture)).Append(',')
+          .Append(s.ClassificationInferTimeS.ToString("0.###", CultureInfo.InvariantCulture)).Append(',')
           .Append(s.ClassificationTimeS.ToString("0.###", CultureInfo.InvariantCulture)).Append(',')
           .Append(s.TotalTimeS.ToString("0.###", CultureInfo.InvariantCulture))
           .AppendLine();
@@ -50,7 +52,7 @@ public static class SahiSummaryCsv
         sb.Append(Escape("批次合计")).Append(',').Append(diamondTotal);
         for (var i = 0; i < ClassColumns.Length; i++)
           sb.Append(',').Append(classTotals[i]);
-        sb.AppendLine(",,,");
+        sb.AppendLine(",,,,,");
       }
 
       File.WriteAllText(csvPath, sb.ToString(), new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));

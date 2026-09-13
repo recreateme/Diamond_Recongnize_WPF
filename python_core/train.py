@@ -5,34 +5,26 @@
 ================================================================================
 
 【架构概览】
-  · 模型  : EfficientNet-B0（torchvision ImageNet 迁移学习，小样本场景首选）
+  · 模型  : MobileNetV3-Small（本地 ImageNet 预训练，真 3 类：棱边/点/面朝上）
   · 策略  : 两阶段微调
-            阶段一 — 冻结 Backbone，仅训练 Dropout + Linear 分类头（快速对齐类别）
-            阶段二 — 解冻全部层，Backbone 与 Head 分层学习率端到端微调
-  · 增强  : 默认适配「离线已增强」数据（轻量在线增强）；原始图用 --no_pre_augmented
-  · 不均衡: 四层策略（详见下方「四层不均衡学习」）
-  · 导出  : best_model.pt（GPU/PyTorch）+ model.onnx（CPU/ONNXRuntime）+ 阈值 JSON
-
-【四层不均衡学习】（类别样本数差异大时必须关注 Macro-F1，而非 Accuracy）
-  第一层 · 采样   : WeightedRandomSampler（原始数据）或 shuffle（离线增强数据）
-  第二层 · 损失   : CrossEntropy / FocalLoss 中传入逆频类别权重
-  第三层 · Focal  : (1-p_t)^γ 聚焦难分样本，默认 γ=2
-  第四层 · 评估   : 以 val_macro_f1 保存最优模型；验证集逐类搜索 class_thresholds.json
+            阶段一 — 冻结 Backbone，仅训练分类头
+            阶段二 — 解冻全部层，统一小学习率 + CosineAnnealing
+  · 增强  : 默认原始裁剪图（Letterbox + 在线增强 + WeightedRandomSampler）
+  · 不均衡: Sampler + Focal + 类别权重；以 val_macro_f1 选最优
+  · 导出  : best_model.pt + model.onnx（不再生成 class_thresholds.json）
 
 【路径约定】
-  PROJECT_ROOT = 本文件所在目录。所有相对路径均相对项目根解析，
-  可从任意工作目录启动，例如:
-    python "D:/.../defects_classify/train.py" --data_dir data --img_size 128
+  PROJECT_ROOT = python_core/。相对路径相对本目录解析；仓库根数据用 ../data。
+  例:
+    python train.py --data_dir ../data --img_size 256 --save_dir ../checkpoints
 
 【常用命令】
   从头训练:
-    python train.py --data_dir data --img_size 128
+    python train.py --data_dir ../data --img_size 256 --save_dir ../checkpoints
   合并 corrections 增量微调:
-    python train.py --finetune --extra_data_dirs corrections
-  仅补跑阈值校准与 ONNX（不重训）:
-    python train.py --postprocess_only
-  指定 checkpoint 继续训练:
-    python train.py --resume checkpoints/best_model.pt --epochs_phase1 0
+    python train.py --finetune --extra_data_dirs ../corrections --save_dir ../checkpoints
+  仅导出 ONNX（不重训）:
+    python train.py --postprocess_only --save_dir ../checkpoints
 """
 
 import os
@@ -55,7 +47,6 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, WeightedRandomSampler, Subset
 import torchvision.transforms as T
-import torchvision.models as models
 import torch.nn.functional as F
 from PIL import Image
 
@@ -136,12 +127,12 @@ def resolve_project_path(
             f"  解析后路径: {p}\n"
             f"  启动前工作目录: {os.getcwd()}\n"
             f"提示: 使用相对项目根的路径，例如 --data_dir data；\n"
-            f"  或: python \"{PROJECT_ROOT / 'train.py'}\" --data_dir data --img_size 128"
+            f"  或: python \"{PROJECT_ROOT / 'train.py'}\" --data_dir ../data --img_size 256"
         )
         if kind == "数据目录":
-            data_candidate = PROJECT_ROOT / "data"
+            data_candidate = PROJECT_ROOT.parent / "data"
             if data_candidate.is_dir():
-                hint += f"\n  检测到 {data_candidate} 存在，请确认 --data_dir 参数。"
+                hint += f"\n  检测到 {data_candidate} 存在，请确认 --data_dir 参数（常用 ../data）。"
             else:
                 hint += f"\n  未找到默认目录 {data_candidate}，请先准备数据集。"
         raise FileNotFoundError(f"{kind}不存在: {raw}{hint}")
@@ -200,6 +191,14 @@ def normalize_training_paths(args: argparse.Namespace) -> argparse.Namespace:
         auto_ckpt = args.save_dir / "best_model.pt"
         if auto_ckpt.is_file():
             args.resume_path = auto_ckpt
+
+    raw_pw = (getattr(args, "pretrained_weights", None) or "").strip()
+    if raw_pw:
+        args.pretrained_weights = resolve_project_path(
+            raw_pw, must_exist=True, kind="预训练权重"
+        )
+    else:
+        args.pretrained_weights = None
 
     return args
 
@@ -290,37 +289,37 @@ def amp_autocast(enabled: bool):
 def get_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="缺陷分类模型训练")
     # 数据
-    p.add_argument("--data_dir",       type=str,   default="data")
-    p.add_argument("--img_size",       type=int,   default=128)
+    p.add_argument("--data_dir",       type=str,   default="../data")
+    p.add_argument("--img_size",       type=int,   default=256)
     p.add_argument("--val_ratio",      type=float, default=0.15,
                    help="验证集比例（0~1）")
     # 训练
     p.add_argument("--batch_size",     type=int,   default=32,
-                   help="批大小（128×128 下可适当增大以稳定梯度）")
-    p.add_argument("--epochs_phase1",  type=int,   default=5,
+                   help="批大小")
+    p.add_argument("--epochs_phase1",  type=int,   default=10,
                    help="阶段一：冻结 Backbone，只训练分类头")
-    p.add_argument("--epochs_phase2",  type=int,   default=20,
+    p.add_argument("--epochs_phase2",  type=int,   default=50,
                    help="阶段二：解冻全部层，端到端微调")
     p.add_argument("--lr_phase1",      type=float, default=1e-3)
-    p.add_argument("--lr_phase2",      type=float, default=1e-4,
-                   help="阶段二 Backbone 学习率（小数据集宜偏低）")
+    p.add_argument("--lr_phase2",      type=float, default=1e-5,
+                   help="阶段二统一学习率（小数据集宜偏低）")
     p.add_argument("--label_smooth",   type=float, default=0.1,
                    help="Label Smoothing，小样本防过拟合")
     p.add_argument("--mixup_alpha",    type=float, default=0,
                    help="MixUp alpha，0 表示关闭（缺陷分类默认关闭）")
-    p.add_argument("--patience",       type=int,   default=8,
-                   help="Early Stopping 耐心轮数")
-    p.add_argument("--pre_augmented",  action="store_true", default=True,
-                   help="数据已离线增强：轻量在线增强 + shuffle（默认开启）")
+    p.add_argument("--patience",       type=int,   default=0,
+                   help="Early Stopping 耐心轮数；0 表示关闭（跑满阶段 epoch）")
+    p.add_argument("--pre_augmented",  action="store_true", default=False,
+                   help="数据已离线增强：轻量在线增强 + shuffle")
     p.add_argument("--no_pre_augmented", dest="pre_augmented", action="store_false",
-                   help="数据未增强：完整在线增强 + WeightedRandomSampler（第一层）")
-    # 不均衡学习（第二～四层）
+                   help="数据未增强：完整在线增强 + WeightedRandomSampler（默认）")
+    # 不均衡学习
     p.add_argument("--use_class_weight", action="store_true", default=True,
-                   help="损失函数中加入逆频类别权重（第二层，默认开启）")
+                   help="损失函数中加入逆频类别权重（默认开启）")
     p.add_argument("--no_class_weight", dest="use_class_weight", action="store_false",
                    help="关闭损失函数类别加权")
     p.add_argument("--use_focal_loss", action="store_true", default=True,
-                   help="使用 Focal Loss 替换 CrossEntropy（第三层，默认开启）")
+                   help="使用 Focal Loss 替换 CrossEntropy（默认开启）")
     p.add_argument("--no_focal_loss", dest="use_focal_loss", action="store_false",
                    help="关闭 Focal Loss，改用加权 CrossEntropy")
     p.add_argument("--focal_gamma", type=float, default=2.0,
@@ -330,7 +329,7 @@ def get_args() -> argparse.Namespace:
     p.add_argument("--amp",            action="store_true", default=True,
                    help="启用混合精度训练（需 GPU）")
     # 输出
-    p.add_argument("--save_dir",       type=str,   default="checkpoints")
+    p.add_argument("--save_dir",       type=str,   default="../checkpoints")
     p.add_argument("--num_workers",    type=int,
                    default=0 if sys.platform == "win32" else 4,
                    help="DataLoader 工作进程数（Windows 建议 0）")
@@ -345,11 +344,13 @@ def get_args() -> argparse.Namespace:
     p.add_argument("--no_reuse_split", dest="reuse_split", action="store_false",
                    help="忽略已保存划分，按 seed 重新划分")
     p.add_argument("--pretrained", action="store_true", default=True,
-                   help="从头训练时使用 ImageNet 预训练 Backbone（默认开启）")
+                   help="从头训练时使用本地 ImageNet 预训练 Backbone（默认开启）")
     p.add_argument("--no_pretrained", dest="pretrained", action="store_false",
-                   help="随机初始化 Backbone（仅建议在无 resume 时尝试）")
+                   help="随机初始化 Backbone")
+    p.add_argument("--pretrained_weights", type=str, default="",
+                   help="MobileNetV3-Small 预训练权重路径（默认 checkpoints/pretrained/...）")
     p.add_argument("--postprocess_only", action="store_true",
-                   help="跳过训练，仅加载 best_model.pt 做阈值校准与 ONNX 导出")
+                   help="跳过训练，仅加载 best_model.pt 做 ONNX 导出")
     return p.parse_args()
 
 
@@ -368,8 +369,9 @@ class DefectDataset(torch.utils.data.Dataset):
 
     目录结构示例:
         data/
-            局部破损/  img001.jpg ...
-            断钻/      img002.jpg ...
+            棱边朝上/  img001.jpg ...
+            点朝上/    img002.jpg ...
+            面朝上/    img003.jpg ...
     """
 
     def __init__(self, data_dirs, transform=None):
@@ -450,47 +452,37 @@ class DefectDataset(torch.utils.data.Dataset):
         return weights / weights.sum() * len(self.classes)
 
 
-def get_transforms(img_size: int, pre_augmented: bool = True) -> Tuple[T.Compose, T.Compose]:
+def get_transforms(img_size: int, pre_augmented: bool = False) -> Tuple[T.Compose, T.Compose]:
     """
     返回训练增强 / 验证预处理的 transforms。
 
-    pre_augmented=True（默认）:
-      数据已在 data/ 中离线增强，在线只做等比缩放与极轻扰动，
-      避免二次强增强导致缺陷特征失真（尤其 128×128 小图）。
-    pre_augmented=False:
-      原始数据训练，启用完整在线增强流水线。
-
-    验证 / 推理预处理统一走 inference_common.build_torchvision_eval_transform，
-    禁止再单独维护 Resize+CenterCrop，以免与线上推理分叉。
+    验证 / 推理统一走 inference_common.build_torchvision_eval_transform（Letterbox）。
+    训练侧先 Letterbox 到正方形，再做几何/颜色增强，避免拉伸畸变。
     """
     from inference_common import (
         IMAGENET_MEAN_LIST,
         IMAGENET_STD_LIST,
+        LetterboxToSquare,
         build_torchvision_eval_transform,
     )
 
     mean = IMAGENET_MEAN_LIST
     std = IMAGENET_STD_LIST
-
     val_tf = build_torchvision_eval_transform(img_size)
 
     if pre_augmented:
-        # 离线已增强：直接缩放到目标分辨率，仅保留轻微翻转
         train_tf = T.Compose([
-            T.Resize((img_size, img_size)),
+            LetterboxToSquare(img_size),
             T.RandomHorizontalFlip(p=0.5),
             T.ToTensor(),
             T.Normalize(mean=mean, std=std),
         ])
     else:
-        # 原始数据：适度在线增强（128 分辨率下裁剪余量不宜过大）
-        margin = max(8, img_size // 8)
         train_tf = T.Compose([
-            T.Resize((img_size + margin, img_size + margin)),
-            T.RandomCrop(img_size),
+            LetterboxToSquare(img_size),
             T.RandomHorizontalFlip(p=0.5),
             T.RandomVerticalFlip(p=0.5),
-            T.RandomRotation(degrees=10),
+            T.RandomRotation(degrees=15),
             T.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.15, hue=0.03),
             T.ToTensor(),
             T.RandomErasing(p=0.15, scale=(0.02, 0.08), ratio=(0.3, 3.0), value=0),
@@ -641,35 +633,17 @@ def build_dataloaders(
 # ═══════════════════════════════════════════════
 # 模型构建
 # ═══════════════════════════════════════════════
-def build_model(num_classes: int, pretrained: bool = True) -> nn.Module:
-    """
-    构建 EfficientNet-B0 + 自定义分类头。
+def build_model(
+    num_classes: int,
+    pretrained: bool = True,
+    weights_path: Optional[Path] = None,
+) -> nn.Module:
+    """构建 MobileNetV3-Small + 自定义末层分类头。"""
+    from model_builder import build_mobilenet_v3_small
 
-    · Dropout(0.4) 抑制小样本过拟合
-    · pretrained=True 时加载 ImageNet 权重（从头训练推荐）
-    · resume/finetune 时由 TrainingPipeline 设 pretrained=False，从 checkpoint 加载
-    · torchvision 过旧时回退 ResNet-18
-    """
-    try:
-        weights = (models.EfficientNet_B0_Weights.IMAGENET1K_V1
-                   if pretrained else None)
-        model = models.efficientnet_b0(weights=weights)
-        in_features = model.classifier[1].in_features
-        model.classifier = nn.Sequential(
-            nn.Dropout(p=0.4, inplace=True),
-            nn.Linear(in_features, num_classes),
-        )
-        print(f"  模型   : EfficientNet-B0  (in_features={in_features})")
-    except AttributeError:
-        # torchvision < 0.11 fallback
-        model = models.resnet18(pretrained=pretrained)
-        in_features = model.fc.in_features
-        model.fc = nn.Sequential(
-            nn.Dropout(p=0.4),
-            nn.Linear(in_features, num_classes),
-        )
-        print(f"  模型   : ResNet-18 (fallback)  (in_features={in_features})")
-    return model
+    return build_mobilenet_v3_small(
+        num_classes, pretrained=pretrained, weights_path=weights_path
+    )
 
 
 def freeze_backbone(model: nn.Module):
@@ -978,62 +952,17 @@ def calibrate_thresholds(
     device,
     save_dir: Path,
 ) -> Dict[str, float]:
-    """
-    第四层 · 阈值校准（One-vs-Rest 逐类搜索）。
-
-    对每个类别 c，在验证集上扫描阈值 t∈[0.05, 0.95]，使「prob[c]≥t 判为 c」的 F1 最大。
-    推理引擎读取 class_thresholds.json 后，仅在 score≥阈值的类别中取 argmax，
-    可提升少数类（如「局部破损」）召回率，降低漏检。
-    """
-    model.eval()
-    model.to(device)
-    all_probs: List[np.ndarray] = []
-    all_labels: List[int] = []
-
-    with torch.no_grad():
-        for imgs, labels in val_loader:
-            imgs = imgs.to(device, non_blocking=True)
-            logits = model(imgs)
-            probs  = torch.softmax(logits, dim=1).cpu().numpy()
-            all_probs.append(probs)
-            all_labels.extend(labels.numpy().tolist())
-
-    probs_mat  = np.vstack(all_probs)
-    labels_arr = np.array(all_labels)
-
-    thresholds: Dict[str, float] = {}
-    print(f"\n  {'─'*58}")
-    print(f"  阈值校准（验证集，搜索步长 0.05）")
-    print(f"  {'─'*58}")
-    print(f"  {'类别':<12}  {'最优阈值':>8}  {'F1':>7}  {'Prec':>7}  {'Rec':>7}  n")
-
-    for idx, cls_name in enumerate(classes):
-        n_pos = int(np.sum(labels_arr == idx))
-        best_f1, best_thr = 0.0, 0.5
-        best_p, best_r = 0.0, 0.0
-
-        for thr in np.arange(0.05, 0.96, 0.05):
-            pred_bin  = (probs_mat[:, idx] >= thr).astype(int)
-            label_bin = (labels_arr == idx).astype(int)
-            tp  = int(np.sum((pred_bin == 1) & (label_bin == 1)))
-            fp  = int(np.sum((pred_bin == 1) & (label_bin == 0)))
-            fn  = int(np.sum((pred_bin == 0) & (label_bin == 1)))
-            pre = tp / (tp + fp + 1e-9)
-            rec = tp / (tp + fn + 1e-9)
-            f1  = 2 * pre * rec / (pre + rec + 1e-9)
-            if f1 > best_f1:
-                best_f1, best_thr = f1, float(thr)
-                best_p, best_r = pre, rec
-
-        thresholds[cls_name] = round(best_thr, 2)
-        print(f"  {cls_name:<12}  {best_thr:>8.2f}  "
-              f"{best_f1:>7.3f}  {best_p:>7.3f}  {best_r:>7.3f}  {n_pos}")
-
+    """已废弃：应用侧不再读取 class_thresholds.json，保留空实现以免外部脚本引用报错。"""
+    del model, val_loader, device
+    print("  [跳过] 阈值校准已移除（应用侧仅用有效类 argmax）")
     out = save_dir / "class_thresholds.json"
-    with open(out, "w", encoding="utf-8") as f:
-        json.dump(thresholds, f, ensure_ascii=False, indent=2)
-    print(f"\n  阈值文件已保存  → {out}")
-    print(f"  （部署时可读取此文件，替代纯 argmax 以提升少数类召回）")
+    thresholds = {c: 0.0 for c in classes}
+    if out.exists():
+        try:
+            out.unlink()
+            print(f"  已删除旧阈值文件 → {out}")
+        except OSError:
+            pass
     return thresholds
 
 
@@ -1060,7 +989,7 @@ class TrainingPipeline:
           ├─ setup_model()     构建网络、可选 load_checkpoint
           ├─ setup_criterion() FocalLoss 或加权 CE + AMP Scaler
           ├─ _train_phases()   阶段一（冻 Backbone）→ 阶段二（全量微调）
-          └─ finalize()        最佳权重评估、曲线/混淆矩阵、阈值校准、ONNX
+          └─ finalize()        最佳权重评估、曲线/混淆矩阵、ONNX
 
     postprocess_only 模式跳过 _train_phases，仅执行 finalize 中的后处理步骤。
     """
@@ -1180,14 +1109,17 @@ class TrainingPipeline:
         a = self.args
         use_pretrained = a.pretrained and (a.resume_path is None)
         if a.resume_path and a.pretrained:
-            print(f"\n  Backbone: 从 checkpoint 加载（忽略 ImageNet 预训练）")
+            print(f"\n  Backbone: 从 checkpoint 加载（忽略本地预训练）")
         elif use_pretrained:
-            print(f"\n  Backbone: ImageNet-1K 预训练")
+            print(f"\n  Backbone: 本地 ImageNet 预训练 (MobileNetV3-Small)")
         else:
             print(f"\n  Backbone: 随机初始化")
 
+        weights_path = a.pretrained_weights if a.pretrained_weights else None
         self.model = build_model(
-            len(self.classes), pretrained=use_pretrained
+            len(self.classes),
+            pretrained=use_pretrained,
+            weights_path=weights_path,
         ).to(self.device)
 
         if a.resume_path:
@@ -1274,11 +1206,16 @@ class TrainingPipeline:
 
     def _train_phases(self) -> None:
         """
-        两阶段训练 + Early Stopping（patience 轮 val_macro_f1 无提升则停止）。
+        两阶段训练；patience>0 时按 val_macro_f1 早停，patience=0 跑满。
 
-        阶段二 Head 学习率为 Backbone 的 5 倍，使分类头更快适应新数据。
+        阶段二：全部参数统一 lr_phase2 + CosineAnnealing。
         """
         a = self.args
+        if a.patience <= 0:
+            print("\n  Early Stopping: 关闭（跑满设定 epoch）")
+        else:
+            print(f"\n  Early Stopping: patience={a.patience}")
+
         if a.epochs_phase1 > 0:
             print(f"\n{'─'*58}")
             print(f"  阶段一：冻结 Backbone  ({a.epochs_phase1} epochs)")
@@ -1296,30 +1233,22 @@ class TrainingPipeline:
             )
             for ep in range(1, a.epochs_phase1 + 1):
                 self._run_epoch(ep, a.epochs_phase1, "P1", optimizer, scheduler)
-                if self.no_improve >= a.patience:
+                if a.patience > 0 and self.no_improve >= a.patience:
                     print(f"  Early stopping @ epoch {ep}")
                     break
             self.no_improve = 0
 
         if a.epochs_phase2 > 0:
             print(f"\n{'─'*58}")
-            print(f"  阶段二：端到端微调  ({a.epochs_phase2} epochs)")
+            print(f"  阶段二：端到端微调  ({a.epochs_phase2} epochs, lr={a.lr_phase2})")
             print(f"{'─'*58}")
             unfreeze_all(self.model)
             total, trainable = count_params(self.model)
             print(f"  可训练参数: {trainable:,} / {total:,}")
 
-            backbone_params = [
-                p for n, p in self.model.named_parameters() if "classifier" not in n
-            ]
-            head_params = [
-                p for n, p in self.model.named_parameters() if "classifier" in n
-            ]
             optimizer = optim.AdamW(
-                [
-                    {"params": backbone_params, "lr": a.lr_phase2},
-                    {"params": head_params, "lr": a.lr_phase2 * 5},
-                ],
+                self.model.parameters(),
+                lr=a.lr_phase2,
                 weight_decay=1e-4,
             )
             scheduler = optim.lr_scheduler.CosineAnnealingLR(
@@ -1331,16 +1260,13 @@ class TrainingPipeline:
                     offset + ep, offset + a.epochs_phase2, "P2",
                     optimizer, scheduler,
                 )
-                if self.no_improve >= a.patience:
+                if a.patience > 0 and self.no_improve >= a.patience:
                     print(f"  Early stopping @ epoch {offset + ep}")
                     break
 
     def finalize(self) -> None:
         """
-        训练收尾：加载 best_model.pt → 报告 → 可视化 → 阈值校准 → ONNX → train_config.json。
-
-        顺序说明: 阈值校准在 GPU 上跑验证集；ONNX 导出会临时将模型移到 CPU，
-        export_onnx 的 finally 块会恢复原 device。
+        训练收尾：加载 best_model.pt → 报告 → 可视化 → ONNX → train_config.json。
         """
         a = self.args
         if not self.best_ckpt_path.is_file():
@@ -1371,16 +1297,10 @@ class TrainingPipeline:
             final_preds, final_labels, self.classes, self.save_dir,
         )
 
-        # 阈值校准需在 GPU 上跑验证集；放在 ONNX 导出之前，避免 export 临时切到 CPU
-        print(f"\n{'─'*58}\n  阈值校准\n{'─'*58}")
-        self.model.to(self.device)
-        calibrate_thresholds(
-            self.model, self.val_loader, self.classes,
-            self.device, self.save_dir,
-        )
-
         print(f"\n{'─'*58}\n  模型导出\n{'─'*58}")
         export_onnx(self.model, a.img_size, self.save_dir, self.device)
+
+        from model_builder import MODEL_ARCH
 
         train_cfg = {
             "project_root":   str(PROJECT_ROOT),
@@ -1390,10 +1310,15 @@ class TrainingPipeline:
             "classes":        self.classes,
             "best_val_acc":   round(final_acc, 6),
             "best_macro_f1":  round(final_f1, 6),
-            "model_arch":     "efficientnet_b0",
+            "model_arch":     MODEL_ARCH,
             "use_focal_loss": a.use_focal_loss,
             "use_class_weight": a.use_class_weight,
             "focal_gamma":    a.focal_gamma,
+            "lr_phase1":      a.lr_phase1,
+            "lr_phase2":      a.lr_phase2,
+            "epochs_phase1":  a.epochs_phase1,
+            "epochs_phase2":  a.epochs_phase2,
+            "patience":       a.patience,
             "resumed_from":   str(a.resume_path) if a.resume_path else None,
         }
         with open(self.save_dir / "train_config.json", "w", encoding="utf-8") as f:

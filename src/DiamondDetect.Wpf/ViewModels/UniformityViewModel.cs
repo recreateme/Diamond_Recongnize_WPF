@@ -40,6 +40,13 @@ public partial class UniformityResultRow : ObservableObject
     public string GridText { get; init; } = "";
     public string Status { get; init; } = "";
     public string ConfFilter { get; init; } = "";
+
+    // 友好百分比（CU / DUlq），跟上面的原始 CV/R 并列展示，不替代。
+    public string VoronoiCuText { get; init; } = "";
+    public string NnCuText { get; init; } = "";
+    public string DelaunayCuText { get; init; } = "";
+    public string GridCuText { get; init; } = "";
+    public string GridDuLqText { get; init; } = "";
 }
 
 public partial class UniformityViewModel : ObservableObject
@@ -481,10 +488,21 @@ public partial class UniformityViewModel : ObservableObject
         GridText = Fmt(row.GridDensityCv),
         Status = row.Status,
         ConfFilter = row.ConfFilter,
+        VoronoiCuText = FmtPct(row.VoronoiAreaCu),
+        NnCuText = FmtPct(row.NnDistanceCu),
+        DelaunayCuText = FmtPct(row.DelaunayEdgeCu),
+        GridCuText = FmtPct(row.GridDensityCu),
+        GridDuLqText = FmtPct(row.GridDensityDuLq),
     };
 
     private static string Fmt(double? v) =>
         v is null ? "" : v.Value.ToString("0.####", CultureInfo.InvariantCulture);
+
+    // CU/DUlq 展示用：极端不均匀时公式可能算出负数，属于正常数学行为（见
+    // python_core/diamond_uniformity.py 里 _cu_and_dulq 的说明），但"负的
+    // 百分比"给人看很怪，这里做 UI 层展示 clamp，不改原始数据。
+    private static string FmtPct(double? v) =>
+        v is null ? "" : Math.Max(0, v.Value).ToString("0.#", CultureInfo.InvariantCulture) + "%";
 
     private string ResolveDefaultOutput()
     {

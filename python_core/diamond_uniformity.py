@@ -18,6 +18,10 @@ Delaunay / 网格密度)这几种算法在真实数据上跑通、验证思路�
    - defect_class 只保留 {"棱边朝上", "点朝上", "面朝上"} 三类朝向类别，
      "断钻" / "局部破损" 不参与空间位置统计（它们仍然是模型的输出类别，
      只是不代表"钻石在不在这个位置"的可靠位置样本）。
+     **例外**：如果这批检测里没有一个点带 defect_class（比如"仅检测定位"
+     模式的 detect_boxes.json 压根没有这个字段），类别过滤自动整体跳过，
+     直接用全部检测框位置正常计算均匀度——不因为缺一个字段就放弃整批计算，
+     也不做额外的警示/标记。
 3. 有效分析区域：用检测点(中心点)集合的**凸包**作为该 tile 的有效区域边界，
    而不是整张图像的矩形边界 —— 因为圆盘边缘的 tile 可能只有一个角落有钻石，
    用整图面积会把"图的大部分根本不属于圆盘"误判成"极度稀疏"。
@@ -37,6 +41,10 @@ Delaunay / 网格密度)这几种算法在真实数据上跑通、验证思路�
      但保留一个更严谨的候选指标不吃亏）
 6. 小样本保护：每个算法都有 min_points 阈值，点数不足时返回 None 并在
    insufficient_data 里标记，而不是硬算一个没有统计意义的数字。
+7. 友好百分比（CU / DUlq）：CV/R 这类统计量对非技术用户不直观，额外提供
+   Christiansen 均匀系数(CU)和低四分位分布均匀度(DUlq)——业界（灌溉/涂层/
+   施肥等均匀性评估）通用的 0~100% 指标，跟原始 CV/R **并列**输出，不互相
+   替代。只对 raw 数组算（gap 型归一化值可能为负，不满足 CU/DUlq 假设）。
 
 【依赖】
     pip install numpy scipy shapely
@@ -164,16 +172,22 @@ def filter_detections(
     config: UniformityConfig = UniformityConfig(),
     *,
     apply_conf_filter: bool = True,
+    apply_class_filter: bool = True,
 ) -> list[dict]:
     """按置信度 + 类别过滤。断钻/局部破损不参与空间位置统计。
 
     apply_conf_filter=False：旧版 detect_boxes 无 det_conf 时跳过置信度过滤。
+    apply_class_filter=False：本批检测完全没有分类信息（如"仅检测定位"模式
+        产出的 detect_boxes.json，没有 defect_class 字段）时跳过类别过滤，
+        直接按检测框位置正常参与统计——均匀度关心"这个位置有没有钻石"，
+        没有朝向分类时用全部检测框仍然是有效信号，不因为缺一个字段就整批
+        放弃计算。
     """
     out = []
     for det in detections:
         if apply_conf_filter and float(det.get("det_conf", 0.0)) < config.conf_threshold:
             continue
-        if det.get("defect_class") not in config.allowed_classes:
+        if apply_class_filter and det.get("defect_class") not in config.allowed_classes:
             continue
         out.append(det)
     return out
@@ -182,7 +196,8 @@ def filter_detections(
 def load_and_filter(json_path: str, config: UniformityConfig = UniformityConfig()) -> list[dict]:
     dets = load_detections(json_path)
     apply_conf = any(d.get("_has_det_conf") for d in dets)
-    return filter_detections(dets, config, apply_conf_filter=apply_conf)
+    apply_class = any(str(d.get("defect_class") or "") for d in dets)
+    return filter_detections(dets, config, apply_conf_filter=apply_conf, apply_class_filter=apply_class)
 
 
 def _extract_points_and_sizes(detections: list[dict]) -> tuple[np.ndarray, np.ndarray]:
@@ -221,6 +236,44 @@ def _cv(values: np.ndarray) -> Optional[float]:
     if abs(mean) < 1e-9:
         return None
     return float(values.std(ddof=0) / mean)
+
+
+def _cu_and_dulq(values: np.ndarray) -> tuple[Optional[float], Optional[float]]:
+    """把一批原始测量值（面积/距离/密度，均为非负"量"）压成两个直观的百分比：
+
+    - CU（Christiansen 均匀系数，灌溉/涂层/施肥等工业均匀性评估的通用指标）：
+        CU = 100% * (1 - 平均绝对偏差 / 均值)
+      100% 代表完全均匀，经验上 >90% 优秀、80~90% 良好、<80% 需要关注。
+    - DUlq（低四分位分布均匀度）：
+        DUlq = 100% * (数值最低 25% 样本的均值 / 全部样本均值)
+      专门盯"最差的一小片区域"，DUlq 越低说明存在越明显的局部稀疏死角；
+      全部相等时 DUlq = 100%。
+
+    只对 raw（未做尺寸/gap归一化）的数组算，因为 CU/DUlq 假设的是"一个非负的
+    量"（比如水深、涂层厚度），gap 型指标可能是负数，不满足这个前提。
+    样本数 < 4 时无法给出有意义的 CU/DUlq，返回 (None, None)。
+
+    极端不均匀（局部空洞导致个别面积/距离远超均值）时 CU 可能算出负数——
+    这是公式本身的正常行为，不是bug，但"负的百分比"给人看会很怪，UI 层
+    展示时建议 clamp 到 0%（比如 max(0, cu)），不要在这里直接截断，保留
+    原始值方便后续做阈值标定时看清楚真实的离散程度。
+    """
+    values = np.asarray(values, dtype=float)
+    values = values[np.isfinite(values)]
+    if values.size < 4:
+        return None, None
+    mean = values.mean()
+    if mean <= 1e-9:
+        return None, None
+
+    mad = np.mean(np.abs(values - mean))
+    cu = 100.0 * (1.0 - mad / mean)
+
+    n_low = max(1, int(math.floor(values.size * 0.25)))
+    low_quarter_mean = np.sort(values)[:n_low].mean()
+    du_lq = 100.0 * (low_quarter_mean / mean)
+
+    return float(cu), float(du_lq)
 
 
 def _convex_hull_polygon(points: np.ndarray) -> Optional[Polygon]:
@@ -518,7 +571,10 @@ def _grid_cells_geometry(
 # --------------------------------------------------------------------------- #
 # 可视化：底图 + 点 + 凸包 + 网格密度热力
 # --------------------------------------------------------------------------- #
-
+# 注意：cv2.putText 用的 Hershey 内置字体不支持中文（会画出一串"?"），下面
+# 所有画在图上的文字标签必须用英文/数字/符号，不能用中文——这是踩过的坑，
+# 之前的"dense"/"sparse"能显示只是因为凑巧是英文，不代表这里支持中文。真要
+# 上中文标签，需要改用 PIL(Pillow) 配中文字体渲染后再贴回 OpenCV 图像。
 UNIFORMITY_VIS_NAME = "uniformity_vis.jpg"
 _VIS_BG_CANDIDATES = (
     "visualization_classified.jpg",
@@ -557,7 +613,7 @@ def _load_vis_background(tile_dir, payload: Optional[dict], points: np.ndarray):
 
 
 def _density_to_bgr(t: float) -> tuple[int, int, int]:
-    """t in [0,1]: 疏(蓝) → 密(红)。OpenCV BGR。"""
+    """t in [0,1]: 疏(蓝) → 密(红)，t=0.5 代表"接近均值"。OpenCV BGR。"""
     t = float(np.clip(t, 0.0, 1.0))
     # 简易分三段插值：蓝 -> 青 -> 黄 -> 红
     if t < 0.33:
@@ -570,7 +626,25 @@ def _density_to_bgr(t: float) -> tuple[int, int, int]:
     return (0, int(255 * (1 - u)), 255)
 
 
-def _draw_legend(img, x0: int, y0: int, width: int, height: int) -> None:
+def _relative_density_color(density: float, mean_density: float, rel_clip: float = 0.75) -> tuple[int, int, int]:
+    """按"相对本图平均密度的偏离幅度"上色，而不是本图自己的 min-max。
+
+    之前的实现每张图都单独把 [该图最小密度, 该图最大密度] 拉伸成蓝→红整个
+    色域，导致哪怕一张图本身只有 5% 的密度波动，颜色也会被拉成"一半全蓝一半
+    全红"，看起来比实际情况严重得多。改成以"偏离均值的相对幅度"定颜色（固定
+    ±75% 为色域两端），真正接近均匀的图，颜色会集中在色域中段（不刺眼），
+    只有偏离幅度真的很大时才会出现饱和的红/蓝——颜色的"严重程度"才跟真实
+    均匀度对得上。
+    """
+    if mean_density <= 1e-9:
+        rel = 0.0
+    else:
+        rel = (density - mean_density) / mean_density
+    t = (float(np.clip(rel, -rel_clip, rel_clip)) + rel_clip) / (2 * rel_clip)
+    return _density_to_bgr(t)
+
+
+def _draw_legend(img, x0: int, y0: int, width: int, height: int, vis_scale: float = 1.0) -> None:
     import cv2
 
     for i in range(height):
@@ -578,8 +652,77 @@ def _draw_legend(img, x0: int, y0: int, width: int, height: int) -> None:
         color = _density_to_bgr(t)
         cv2.line(img, (x0, y0 + i), (x0 + width - 1, y0 + i), color, 1)
     cv2.rectangle(img, (x0, y0), (x0 + width - 1, y0 + height - 1), (40, 40, 40), 1)
-    cv2.putText(img, "dense", (x0 - 2, y0 - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (20, 20, 20), 1, cv2.LINE_AA)
-    cv2.putText(img, "sparse", (x0 - 8, y0 + height + 14), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (20, 20, 20), 1, cv2.LINE_AA)
+    font_scale = 0.42 * vis_scale
+    thick = max(1, int(round(vis_scale)))
+    cv2.putText(img, "+75%", (x0 - int(6 * vis_scale), y0 - int(6 * vis_scale)),
+                cv2.FONT_HERSHEY_SIMPLEX, font_scale, (20, 20, 20), thick, cv2.LINE_AA)
+    cv2.putText(img, "avg", (x0 - int(6 * vis_scale), y0 + height // 2),
+                cv2.FONT_HERSHEY_SIMPLEX, font_scale, (20, 20, 20), thick, cv2.LINE_AA)
+    cv2.putText(img, "-75%", (x0 - int(6 * vis_scale), y0 + height + int(14 * vis_scale)),
+                cv2.FONT_HERSHEY_SIMPLEX, font_scale, (20, 20, 20), thick, cv2.LINE_AA)
+
+
+def _render_density_panel(
+    cells: list[dict],
+    hull: Polygon,
+    panel_w: int,
+    panel_h: int,
+    vis_scale: float,
+):
+    """把网格密度热力图画在独立的一块画布上（不跟检测框/分类框叠在一起）。
+
+    之前的实现是把半透明色块直接盖在已经画了检测框/分类框的底图上，两层
+    标注互相打架，格子数又少（最多6x6），看起来容易糊成一片。改成单独一块
+    面板，跟主图（底图+点+凸包）左右并排，两个信号都能看清楚。
+    """
+    import cv2
+
+    img = np.full((panel_h, panel_w, 3), 248, dtype=np.uint8)
+    minx, miny, maxx, maxy = hull.bounds
+    span_x = (maxx - minx) or 1.0
+    span_y = (maxy - miny) or 1.0
+
+    margin = int(round(24 * vis_scale))
+    title_h = int(round(26 * vis_scale))
+    avail_w = max(1, panel_w - 2 * margin)
+    avail_h = max(1, panel_h - 2 * margin - title_h)
+    scale = min(avail_w / span_x, avail_h / span_y)
+    offset_x = margin + (avail_w - span_x * scale) / 2.0
+    offset_y = margin + title_h + (avail_h - span_y * scale) / 2.0
+
+    def to_panel_xy(x: float, y: float) -> tuple[int, int]:
+        return (
+            int(round(offset_x + (x - minx) * scale)),
+            int(round(offset_y + (y - miny) * scale)),
+        )
+
+    if cells:
+        dens = np.array([c["density"] for c in cells], dtype=float)
+        mean_density = float(dens.mean())
+        for c in cells:
+            color = _relative_density_color(c["density"], mean_density)
+            x0, y0 = to_panel_xy(c["x0"], c["y0"])
+            x1, y1 = to_panel_xy(c["x1"], c["y1"])
+            if x1 > x0 and y1 > y0:
+                cv2.rectangle(img, (x0, y0), (x1, y1), color, -1)
+                cv2.rectangle(img, (x0, y0), (x1, y1), (90, 90, 90), max(1, int(round(vis_scale))))
+
+    hx, hy = hull.exterior.xy
+    hull_pts = np.array([to_panel_xy(x, y) for x, y in zip(hx, hy)], dtype=np.int32)
+    if len(hull_pts) >= 2:
+        cv2.polylines(img, [hull_pts], isClosed=True, color=(0, 150, 0),
+                      thickness=max(1, int(round(vis_scale))))
+
+    cv2.putText(img, "Density (rel. to avg)", (margin, int(round(18 * vis_scale))),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5 * vis_scale, (30, 30, 30),
+                max(1, int(round(vis_scale))), cv2.LINE_AA)
+
+    legend_w = max(12, int(round(14 * vis_scale)))
+    legend_h = max(60, int(round(panel_h * 0.26)))
+    lx = max(margin, panel_w - legend_w - int(round(26 * vis_scale)))
+    ly = panel_h - legend_h - int(round(24 * vis_scale))
+    _draw_legend(img, lx, ly, legend_w, legend_h, vis_scale)
+    return img
 
 
 def render_uniformity_visualization(
@@ -587,7 +730,7 @@ def render_uniformity_visualization(
     conf_threshold: float = 0.25,
     out_path: Optional[str] = None,
 ) -> dict:
-    """生成 uniformity_vis.jpg：底图 + 过滤点 + 凸包 + 网格密度热力。"""
+    """生成 uniformity_vis.jpg：左侧底图+点+凸包，右侧独立的网格密度面板。"""
     import cv2
     from pathlib import Path
 
@@ -609,7 +752,8 @@ def render_uniformity_visualization(
             payload = json.load(f)
         dets = load_detections(str(path))
         apply_conf = any(d.get("_has_det_conf") for d in dets)
-        filtered = filter_detections(dets, config, apply_conf_filter=apply_conf)
+        apply_class = any(str(d.get("defect_class") or "") for d in dets)
+        filtered = filter_detections(dets, config, apply_conf_filter=apply_conf, apply_class_filter=apply_class)
         result["n_points"] = len(filtered)
         if len(filtered) < 3:
             result["status"] = "跳过:点数不足"
@@ -623,59 +767,54 @@ def render_uniformity_visualization(
 
         base, bg_name = _load_vis_background(tile_dir, payload if isinstance(payload, dict) else None, points)
         result["background"] = bg_name
-        img = base.copy()
-        h, w = img.shape[:2]
+        main_img = base.copy()
+        h, w = main_img.shape[:2]
+        # 标注元素尺寸系数：以 960px 为参考基准。原图分辨率越高（比如5120px的
+        # tile），点/线/字就按比例放大，避免最终缩到预览缩略图（~720px）里时
+        # 小到看不清——之前是按固定像素数画的，只在原图原样查看时看得清楚。
+        vis_scale = max(1.0, min(w, h) / 960.0)
 
         n_grid, cells = _grid_cells_geometry(points, hull, config)
         result["grid_n"] = n_grid
 
-        if cells:
-            dens = np.array([c["density"] for c in cells], dtype=float)
-            d_min, d_max = float(np.min(dens)), float(np.max(dens))
-            span = d_max - d_min if d_max > d_min else 1.0
-            overlay = img.copy()
-            for c in cells:
-                t = (c["density"] - d_min) / span
-                color = _density_to_bgr(t)
-                x0 = int(np.clip(round(c["x0"]), 0, w - 1))
-                y0 = int(np.clip(round(c["y0"]), 0, h - 1))
-                x1 = int(np.clip(round(c["x1"]), 0, w))
-                y1 = int(np.clip(round(c["y1"]), 0, h))
-                if x1 > x0 and y1 > y0:
-                    cv2.rectangle(overlay, (x0, y0), (x1 - 1, y1 - 1), color, -1)
-            img = cv2.addWeighted(overlay, 0.35, img, 0.65, 0)
-            for c in cells:
-                x0 = int(np.clip(round(c["x0"]), 0, w - 1))
-                y0 = int(np.clip(round(c["y0"]), 0, h - 1))
-                x1 = int(np.clip(round(c["x1"]), 0, w))
-                y1 = int(np.clip(round(c["y1"]), 0, h))
-                if x1 > x0 and y1 > y0:
-                    cv2.rectangle(img, (x0, y0), (x1 - 1, y1 - 1), (80, 80, 80), 1)
-
-        # 凸包
+        # 主图只画点 + 凸包，不叠加密度色块——避免跟底图上已有的检测框/分类框
+        # 打架糊成一片；密度信号改到右侧独立面板里展示。
         hx, hy = hull.exterior.xy
         hull_pts = np.array([[int(round(x)), int(round(y))] for x, y in zip(hx, hy)], dtype=np.int32)
         if len(hull_pts) >= 2:
-            cv2.polylines(img, [hull_pts], isClosed=True, color=(0, 180, 0), thickness=2)
+            cv2.polylines(main_img, [hull_pts], isClosed=True, color=(0, 180, 0),
+                          thickness=max(2, int(round(2 * vis_scale))))
 
-        # 点
-        r = max(2, int(round(min(w, h) / 400)))
+        r = max(3, int(round((min(w, h) / 400) * vis_scale)))
         for x, y in points:
             cx, cy = int(round(x)), int(round(y))
             if 0 <= cx < w and 0 <= cy < h:
-                cv2.circle(img, (cx, cy), r, (0, 255, 255), -1, lineType=cv2.LINE_AA)
-                cv2.circle(img, (cx, cy), r, (0, 120, 120), 1, lineType=cv2.LINE_AA)
+                cv2.circle(main_img, (cx, cy), r, (0, 255, 255), -1, lineType=cv2.LINE_AA)
+                cv2.circle(main_img, (cx, cy), r, (0, 120, 120), max(1, int(round(vis_scale))), lineType=cv2.LINE_AA)
 
-        # 图例
-        legend_w, legend_h = 18, max(80, h // 6)
-        lx = max(8, w - legend_w - 16)
-        ly = 24
-        _draw_legend(img, lx, ly, legend_w, legend_h)
-        label = f"n={len(filtered)} grid={n_grid if n_grid else '-'}"
-        cv2.putText(img, label, (12, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 0), 2, cv2.LINE_AA)
-        cv2.putText(img, label, (12, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 1, cv2.LINE_AA)
+        label = f"n={len(filtered)}"
+        font_scale = 0.8 * vis_scale
+        (label_w, label_h), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, font_scale,
+                                                 max(2, int(round(2 * vis_scale))))
+        pad = int(round(6 * vis_scale))
+        origin = (int(round(12 * vis_scale)), int(round(28 * vis_scale)))
+        # 先垫一块半透明底色再写字，避免文字压在黄色标注点/浅色底图上看不清
+        box_overlay = main_img.copy()
+        cv2.rectangle(box_overlay, (origin[0] - pad, origin[1] - label_h - pad),
+                      (origin[0] + label_w + pad, origin[1] + pad), (0, 0, 0), -1)
+        main_img = cv2.addWeighted(box_overlay, 0.45, main_img, 0.55, 0)
+        cv2.putText(main_img, label, origin,
+                    cv2.FONT_HERSHEY_SIMPLEX, font_scale, (255, 255, 255), max(1, int(round(vis_scale))), cv2.LINE_AA)
 
-        cv2.imwrite(str(vis_path), img, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
+        panel_w = max(int(round(220 * vis_scale)), int(round(w * 0.32)))
+        panel = _render_density_panel(cells, hull, panel_w, h, vis_scale)
+
+        gap = max(4, int(round(6 * vis_scale)))
+        combined = np.full((h, w + gap + panel_w, 3), 255, dtype=np.uint8)
+        combined[:, :w] = main_img
+        combined[:, w + gap:] = panel
+
+        cv2.imwrite(str(vis_path), combined, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
         result["vis_path"] = str(vis_path.resolve())
     except Exception as ex:  # noqa: BLE001
         result["status"] = f"可视化失败 ({type(ex).__name__})"
@@ -757,6 +896,14 @@ def compute_uniformity_scores(
             "delaunay_edge_cv_normalized": None,
             "grid_density_cv": None,
             "grid_n": None,
+            "voronoi_area_cu": None,
+            "voronoi_area_du_lq": None,
+            "nn_distance_cu": None,
+            "nn_distance_du_lq": None,
+            "delaunay_edge_cu": None,
+            "delaunay_edge_du_lq": None,
+            "grid_density_cu": None,
+            "grid_density_du_lq": None,
             "insufficient_data": {
                 "voronoi": True, "nn": True, "delaunay": True, "grid": True,
             },
@@ -777,6 +924,13 @@ def compute_uniformity_scores(
         config.grid_min_valid_area_ratio,
     )
 
+    # 友好百分比指标（CU / DUlq）：并列于 CV/R 之外展示，供UI/CSV直接给非技术
+    # 用户看；只用 raw 数组算（gap 型归一化值可能为负，不满足 CU/DUlq 的假设）。
+    voronoi_cu, voronoi_du = _cu_and_dulq(vor_res["areas"]) if vor_res["areas"] is not None else (None, None)
+    nn_cu, nn_du = _cu_and_dulq(nn_res["nn_distances"]) if nn_res["nn_distances"] is not None else (None, None)
+    del_cu, del_du = _cu_and_dulq(del_res["edge_lengths"]) if del_res["edge_lengths"] is not None else (None, None)
+    grid_cu, grid_du = _cu_and_dulq(grid_res["cell_densities"]) if grid_res["cell_densities"] is not None else (None, None)
+
     result.update({
         "hull_area": hull.area if hull is not None else None,
         "voronoi_area_cv_raw": vor_res["raw"],
@@ -788,6 +942,14 @@ def compute_uniformity_scores(
         "delaunay_edge_cv_normalized": del_res["normalized"],
         "grid_density_cv": grid_res["cv"],
         "grid_n": grid_res["n_grid"],
+        "voronoi_area_cu": voronoi_cu,
+        "voronoi_area_du_lq": voronoi_du,
+        "nn_distance_cu": nn_cu,
+        "nn_distance_du_lq": nn_du,
+        "delaunay_edge_cu": del_cu,
+        "delaunay_edge_du_lq": del_du,
+        "grid_density_cu": grid_cu,
+        "grid_density_du_lq": grid_du,
         "insufficient_data": {
             "voronoi": vor_res["insufficient_data"],
             "nn": nn_res["insufficient_data"],
@@ -882,10 +1044,10 @@ def _self_test() -> None:
         scores = compute_uniformity_scores(dets, already_filtered=True)
         print(f"--- {name} (n={scores['n_points']}) ---")
         for k in [
-            "voronoi_area_cv_raw", "voronoi_area_cv_normalized",
-            "nn_distance_cv_raw", "nn_distance_cv_normalized", "clark_evans_R",
-            "delaunay_edge_cv_raw", "delaunay_edge_cv_normalized",
-            "grid_density_cv", "grid_n",
+            "voronoi_area_cv_raw", "voronoi_area_cv_normalized", "voronoi_area_cu", "voronoi_area_du_lq",
+            "nn_distance_cv_raw", "nn_distance_cv_normalized", "clark_evans_R", "nn_distance_cu", "nn_distance_du_lq",
+            "delaunay_edge_cv_raw", "delaunay_edge_cv_normalized", "delaunay_edge_cu", "delaunay_edge_du_lq",
+            "grid_density_cv", "grid_n", "grid_density_cu", "grid_density_du_lq",
         ]:
             v = scores[k]
             print(f"  {k:32s}: {v:.4f}" if isinstance(v, float) else f"  {k:32s}: {v}")
@@ -896,6 +1058,8 @@ def _self_test() -> None:
         "     Clark-Evans R 越大（>1 代表比随机更规则）；聚集+空洞场景相反。\n"
         "  2) 最后一个场景（六边形+尺寸抖动）里，如果 normalized 版本的 CV 明显\n"
         "     低于 raw 版本，说明尺寸归一化确实在剔除'纯尺寸差异'带来的干扰。\n"
+        "  3) CU/DUlq 是 0~100% 的友好指标，跟第1条同方向：越'均匀'的场景数值\n"
+        "     应越接近100%；DUlq 专盯最差25%区域，聚集+空洞场景应明显偏低。\n"
     )
 
 
@@ -916,20 +1080,44 @@ SCORE_KEYS = (
     "delaunay_edge_cv_normalized",
     "grid_density_cv",
     "grid_n",
+    "voronoi_area_cu",
+    "voronoi_area_du_lq",
+    "nn_distance_cu",
+    "nn_distance_du_lq",
+    "delaunay_edge_cu",
+    "delaunay_edge_du_lq",
+    "grid_density_cu",
+    "grid_density_du_lq",
     "insufficient_data",
 )
 
+# CSV 表头改中文（原来的英文字段名跟项目其它 CSV 的风格不一致）；CU/DU 友好
+# 百分比与原始 CV/R 并列展示，不互相替代——前者给人看，后者给后续人工标注
+# + 自动定阈值用。每项是 (内部字段名, CSV表头文字)。
 SUMMARY_COLUMNS = (
-    "图像",
-    "n_points",
-    "voronoi_area_cv_normalized",
-    "nn_distance_cv_normalized",
-    "clark_evans_R",
-    "delaunay_edge_cv_normalized",
-    "grid_density_cv",
-    "status",
-    "conf_filter",
+    ("image", "图像"),
+    ("n_points", "钻石数"),
+    ("voronoi_area_cu", "Voronoi均匀度%"),
+    ("voronoi_area_cv_normalized", "Voronoi面积CV"),
+    ("nn_distance_cu", "间距均匀度%"),
+    ("clark_evans_R", "规则度R"),
+    ("delaunay_edge_cu", "三角网均匀度%"),
+    ("delaunay_edge_cv_normalized", "Delaunay边长CV"),
+    ("grid_density_cu", "区域均匀度%"),
+    ("grid_density_du_lq", "最差区域均匀度%"),
+    ("grid_density_cv", "区域密度CV"),
+    ("status", "状态"),
+    ("conf_filter", "置信度过滤"),
 )
+
+_SUMMARY_TEXT_KEYS = {"image", "n_points", "status", "conf_filter"}
+
+
+def _fmt_summary_value(value, key: str) -> str:
+    """CSV 单元格格式化：文本类字段原样输出，数值类字段走 _fmt_score。"""
+    if key in _SUMMARY_TEXT_KEYS:
+        return "" if value is None else str(value)
+    return _fmt_score(value)
 
 
 def _json_safe(value):
@@ -1016,15 +1204,12 @@ def analyze_detect_boxes_file(
             _maybe_write()
             return result
 
-        has_class = any(str(d.get("defect_class") or "") for d in dets)
-        if not has_class:
-            result["status"] = "跳过:无分类列"
-            _maybe_write()
-            return result
-
         apply_conf = any(d.get("_has_det_conf") for d in dets)
+        # 「仅检测定位」模式没有 defect_class 字段：不因此放弃计算，退化为只按
+        # 检测框位置统计（不做朝向类别过滤）。
+        apply_class = any(str(d.get("defect_class") or "") for d in dets)
         result["conf_filter"] = "applied" if apply_conf else "skipped"
-        filtered = filter_detections(dets, config, apply_conf_filter=apply_conf)
+        filtered = filter_detections(dets, config, apply_conf_filter=apply_conf, apply_class_filter=apply_class)
         scores = compute_uniformity_scores(filtered, config, already_filtered=True)
         for key in SCORE_KEYS:
             if key in scores:
@@ -1053,7 +1238,7 @@ def analyze_detect_boxes_file(
 
 
 def write_uniformity_summary_csv(output_root: str, rows: list[dict]) -> str:
-    """写出输出根目录 uniformity_summary.csv（精简列 + status + conf_filter）。"""
+    """写出输出根目录 uniformity_summary.csv（中文表头；CU/DU友好百分比与原始CV/R并列）。"""
     import csv
     from pathlib import Path
 
@@ -1062,19 +1247,9 @@ def write_uniformity_summary_csv(output_root: str, rows: list[dict]) -> str:
     csv_path = root / "uniformity_summary.csv"
     with open(csv_path, "w", newline="", encoding="utf-8-sig") as f:
         writer = csv.writer(f)
-        writer.writerow(SUMMARY_COLUMNS)
+        writer.writerow([label for _, label in SUMMARY_COLUMNS])
         for row in rows:
-            writer.writerow([
-                row.get("image", ""),
-                row.get("n_points", ""),
-                _fmt_score(row.get("voronoi_area_cv_normalized")),
-                _fmt_score(row.get("nn_distance_cv_normalized")),
-                _fmt_score(row.get("clark_evans_R")),
-                _fmt_score(row.get("delaunay_edge_cv_normalized")),
-                _fmt_score(row.get("grid_density_cv")),
-                row.get("status", ""),
-                row.get("conf_filter", ""),
-            ])
+            writer.writerow([_fmt_summary_value(row.get(key), key) for key, _ in SUMMARY_COLUMNS])
     return str(csv_path.resolve())
 
 

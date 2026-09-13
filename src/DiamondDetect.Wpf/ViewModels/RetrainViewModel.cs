@@ -45,9 +45,12 @@ public partial class RetrainViewModel : ObservableObject
     [ObservableProperty] private string unlockButtonText = "输入密码解锁";
     [ObservableProperty] private bool formEnabled;
     [ObservableProperty] private string statsText = "点击「刷新统计」查看数据情况";
-    [ObservableProperty] private int imgSize = 128;
+    [ObservableProperty] private string modelArch = "MobileNetV3-Small";
+    [ObservableProperty] private int imgSize = 256;
     [ObservableProperty] private int epochsPhase1 = 10;
-    [ObservableProperty] private int epochsPhase2 = 25;
+    [ObservableProperty] private int epochsPhase2 = 50;
+    [ObservableProperty] private double lrPhase1 = 1e-3;
+    [ObservableProperty] private double lrPhase2 = 1e-5;
     [ObservableProperty] private int batchSize = 16;
     [ObservableProperty] private bool isTraining;
     [ObservableProperty] private bool canApply;
@@ -140,8 +143,12 @@ public partial class RetrainViewModel : ObservableObject
             "--batch_size", BatchSize.ToString(),
             "--epochs_phase1", EpochsPhase1.ToString(),
             "--epochs_phase2", EpochsPhase2.ToString(),
+            "--lr_phase1", LrPhase1.ToString("G", System.Globalization.CultureInfo.InvariantCulture),
+            "--lr_phase2", LrPhase2.ToString("G", System.Globalization.CultureInfo.InvariantCulture),
+            "--patience", "0",
             "--save_dir", saveDir,
             "--num_workers", "0",
+            "--no_pre_augmented",
         };
         if (Directory.Exists(corrDir))
         {

@@ -6,8 +6,8 @@
 | 项 | 内容 |
 |----|------|
 | 项目根目录 | `D:\Develop\diamond_detect_wpf` |
-| 文档版本 | v1.3 |
-| 日期 | 2026-09-10 |
+| 文档版本 | v1.5 |
+| 日期 | 2026-09-11 |
 
 ---
 
@@ -15,7 +15,7 @@
 
 本系统做三件事：
 
-1. **分类**：应用对外三类（棱边朝上 / 点朝上 / 面朝上）。模型权重仍按 5 类训练与导出；推理排除「局部破损」「断钻」后取有效类最高分。
+1. **分类**：对外三类（棱边朝上 / 点朝上 / 面朝上）。现行权重为真 3 类 MobileNetV3-Small（Letterbox 256）；若加载历史 5 类权重，推理仍排除「局部破损」「断钻」后取有效类最高分。
 2. **大图检测**：对约 5120×5120 图做 SAHI 切片 + YOLO 检出，再对裁剪块分类。
 3. **主动学习**：机台误分类归档 → 开发机微调 → 更新模型回机台。
 
@@ -351,19 +351,21 @@ checkpoints/train_config.json
 
 | 文件 | 完整模式 | 仅检测 |
 |------|----------|--------|
-| `detect_boxes.json` / `.csv` | ✓（含 `defect_class`、`defect_conf`） | ✓（仅坐标） |
+| `detect_boxes.json` / `.csv` | ✓（含 `defect_class`、`defect_conf`；勾选 crop 时含 `crop_path`） | ✓（坐标；勾选 crop 时含 `crop_path`） |
+| `crop/` | 勾选「保存裁剪切片」：`crop/<类别>/NNNN.jpg` | 勾选时：`crop/NNNN.jpg`（平铺） |
 | `visualization_classified.jpg` | 勾选「保存可视化」且有目标 | — |
 | `visualization_detection.jpg` | — | 勾选「保存可视化」且有目标 |
 | `{stem}_detect_input.jpg` | — | 下采样时 |
 
-不再生成：`crops/`、`result.json`、`statistics.json`。
+默认不写：`result.json`、`statistics.json`。`crop/` 与可视化均为可选（默认关）。
 
 #### `summary.csv`（仅完整模式）
 
 由 `SahiSummaryCsv` 写入输出根目录，表头：
 
-`图像,汇总钻石数,棱边朝上,点朝上,面朝上,检测耗时(s),分类耗时(s),总耗时(s)`
+`图像,汇总钻石数,棱边朝上,点朝上,面朝上,检测耗时(s),分类预处理(s),分类推理(s),分类耗时(s),总耗时(s)`
 
+- **分类预处理**：OpenCV Letterbox 等 CPU 耗时；**分类推理**：模型 batch forward；**分类耗时** = 二者之和。
 - 单张 / 多选文件 / 文件夹批量均会写出。
 - 多张时末行 `批次合计`；单张无合计行。
 - 误删后重新跑一遍完整模式即可恢复。
@@ -372,8 +374,10 @@ checkpoints/train_config.json
 
 ### 7.2.2 钻石检测页交互（2026-09）
 
-- 输入区：「选择文件」「选择文件夹」横排；路径完整显示。
-- 输出选项：「保存可视化结果」（默认不勾）。
+- 输入区：「选择文件」「选择文件夹」横排；路径完整显示（过长可换行，悬停看全文）。
+- 「结果保存目录」与输入区同级固定可见（不再塞进限高滚动区）。
+- 处理模式 / 输出选项并排；勾选项文案缩短，细节见悬停 ToolTip。
+- 输出选项（均默认不勾）：「保存可视化结果」「保存裁剪切片 crop/」「完成后计算均匀度」（仅完整模式）。
 - 停止：协作式取消（SAHI 切片批次间响应）；点击后显示「正在停止…」。
 - 完成后先复位进度与按钮，再弹「是否打开结果文件夹」。
 
@@ -453,7 +457,7 @@ dotnet run --project src\DiamondDetect.Wpf
 conda activate cv-yolo
 cd D:\Develop\diamond_detect_wpf\python_core
 python analyze_image_sizes.py --data_dir ..\data
-python train.py --data_dir ..\data --img_size 128
+python train.py --data_dir ..\data --img_size 256 --save_dir ..\checkpoints
 python train.py --finetune --extra_data_dirs ..\corrections
 python train.py --postprocess_only
 python scripts\verify_deploy.py
@@ -468,7 +472,7 @@ python scripts\verify_deploy.py
 | 按钮文案、布局、主题色 | `DiamondDetect.Wpf` |
 | 结果表格列、导出按钮行为 | 对应 ViewModel + Core DTO |
 | Python 调不通 / 进度回调 | `DiamondDetect.Bridge` |
-| 识别类别错、阈值怪 | `python_core/inference_common.py`（及训练阈值文件） |
+| 识别类别错 | `python_core/inference_common.py`（有效类 argmax；勿再依赖阈值文件） |
 | 大图漏检、框异常 | `python_core/sahi_detector.py` + 设置中 SAHI 参数 |
 | 打包体积、机台 DLL | `python_core/scripts/` |
 

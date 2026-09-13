@@ -250,6 +250,59 @@ def crop_with_padding(
     return img[cy1:cy2, cx1:cx2]
 
 
+def _safe_class_dirname(name: str) -> str:
+    """Windows 安全的类别子目录名。"""
+    raw = (name or "").strip() or "未分类"
+    for ch in '\\/:*?"<>|':
+        raw = raw.replace(ch, "_")
+    raw = raw.strip(" .")
+    return raw or "未分类"
+
+
+def save_crop_images(
+    img_out_dir: Path,
+    crops_bgr: List[np.ndarray],
+    dets: List[Detection],
+    *,
+    by_class: bool,
+) -> Path:
+    """
+    将裁剪图写入 `{img_out_dir}/crop/`。
+
+    · by_class=True（完整分类模式）: crop/<类别>/0001.jpg …
+    · by_class=False（仅检测）: crop/0001.jpg …
+    同时写入 Detection.crop_path（相对产品输出目录的 posix 路径）。
+    """
+    if len(crops_bgr) != len(dets):
+        raise ValueError(
+            f"裁剪数 ({len(crops_bgr)}) 与检测框数 ({len(dets)}) 不一致"
+        )
+    crop_root = Path(img_out_dir) / "crop"
+    if crop_root.exists():
+        import shutil
+        shutil.rmtree(crop_root, ignore_errors=True)
+    crop_root.mkdir(parents=True, exist_ok=True)
+
+    width = max(4, len(str(len(dets))))
+    for i, (crop, det) in enumerate(zip(crops_bgr, dets), start=1):
+        fname = f"{i:0{width}d}.jpg"
+        if by_class:
+            cls_dir = _safe_class_dirname(det.display_class or "未分类")
+            out_dir = crop_root / cls_dir
+            out_dir.mkdir(parents=True, exist_ok=True)
+            rel = f"crop/{cls_dir}/{fname}"
+        else:
+            out_dir = crop_root
+            rel = f"crop/{fname}"
+        out_path = out_dir / fname
+        if crop is None or crop.size == 0:
+            det.crop_path = ""
+            continue
+        cv2.imwrite(str(out_path), crop, [int(cv2.IMWRITE_JPEG_QUALITY), 92])
+        det.crop_path = rel
+    return crop_root
+
+
 # ════════════════════════════════════════════════════════════════════════
 # 检测后处理 — IoS 包含抑制 / 面积过滤 / 边缘剔除
 # ════════════════════════════════════════════════════════════════════════
@@ -946,7 +999,7 @@ class SahiPipeline:
       1. 读取大图 → SahiDetector.detect() → 检测框列表
       2. 内存裁剪 → InferenceEngine 批量分类
       3. 写出 detect_boxes.json/csv（含分类列）
-      4. 可选写出 visualization_classified.jpg
+      4. 可选写出 crop/（按类别子目录）与 visualization_classified.jpg
       5. 返回统计字典（summary.csv 由 WPF Bridge 写入）
     """
 
@@ -957,12 +1010,14 @@ class SahiPipeline:
         output_dir: str,
         crop_padding: int = 15,
         save_visualization: bool = False,
+        save_crops: bool = False,
     ):
         self.detector = detector
         self.classifier = classifier
         self.output_dir = Path(output_dir)
         self.crop_padding = crop_padding
         self.save_visualization = bool(save_visualization)
+        self.save_crops = bool(save_crops)
 
     def process_image(
         self,
@@ -1071,35 +1126,58 @@ class SahiPipeline:
         )
 
         t1 = time.time()
-        predict_images = getattr(self.classifier, "predict_batch_images", None)
-        if callable(predict_images):
-            from PIL import Image as _PILImage
-            crop_pils = [
-                _PILImage.fromarray(cv2.cvtColor(c, cv2.COLOR_BGR2RGB))
-                for c in crop_bgr
-            ]
-            _log(f"批量分类 {len(crop_pils)} 个裁剪图（内存，与 predict_batch 同预处理）...")
-            cls_results = predict_images(
-                crop_pils,
+        cls_pre_s = 0.0
+        cls_inf_s = 0.0
+        predict_bgr = getattr(self.classifier, "predict_batch_bgr", None)
+        if callable(predict_bgr):
+            _log(f"批量分类 {len(crop_bgr)} 个裁剪图（OpenCV letterbox，无 PIL）...")
+            timing: Dict[str, float] = {}
+            cls_results = predict_bgr(
+                crop_bgr,
                 should_stop=should_stop,
+                timing_out=timing,
             )
+            cls_pre_s = float(timing.get("preprocess_s", 0.0))
+            cls_inf_s = float(timing.get("infer_s", 0.0))
+            cls_time = cls_pre_s + cls_inf_s
         else:
-            import shutil
-            import tempfile
-            tmp_dir = Path(tempfile.mkdtemp(prefix="sahi_crop_"))
-            try:
-                crop_paths: List[str] = []
-                for i, crop in enumerate(crop_bgr):
-                    crop_path = str(tmp_dir / f"{i + 1:04d}.jpg")
-                    cv2.imwrite(crop_path, crop, [cv2.IMWRITE_JPEG_QUALITY, 92])
-                    crop_paths.append(crop_path)
-                _log(f"批量分类 {len(crop_paths)} 个裁剪图（临时磁盘回退）...")
-                cls_results = self.classifier.predict_batch(
-                    crop_paths, should_stop=should_stop,
+            predict_images = getattr(self.classifier, "predict_batch_images", None)
+            if callable(predict_images):
+                from PIL import Image as _PILImage
+                crop_pils = [
+                    _PILImage.fromarray(cv2.cvtColor(c, cv2.COLOR_BGR2RGB))
+                    for c in crop_bgr
+                ]
+                _log(f"批量分类 {len(crop_pils)} 个裁剪图（内存 PIL 回退）...")
+                cls_results = predict_images(
+                    crop_pils,
+                    should_stop=should_stop,
                 )
-            finally:
-                shutil.rmtree(tmp_dir, ignore_errors=True)
-        cls_time = time.time() - t1
+            else:
+                import shutil
+                import tempfile
+                tmp_dir = Path(tempfile.mkdtemp(prefix="sahi_crop_"))
+                try:
+                    crop_paths: List[str] = []
+                    for i, crop in enumerate(crop_bgr):
+                        crop_path = str(tmp_dir / f"{i + 1:04d}.jpg")
+                        cv2.imwrite(crop_path, crop, [cv2.IMWRITE_JPEG_QUALITY, 92])
+                        crop_paths.append(crop_path)
+                    _log(f"批量分类 {len(crop_paths)} 个裁剪图（临时磁盘回退）...")
+                    cls_results = self.classifier.predict_batch(
+                        crop_paths, should_stop=should_stop,
+                    )
+                finally:
+                    shutil.rmtree(tmp_dir, ignore_errors=True)
+            cls_time = time.time() - t1
+            cls_pre_s = cls_time
+            cls_inf_s = 0.0
+        if cls_time <= 0:
+            cls_time = time.time() - t1
+        _log(
+            f"分类耗时 {cls_time:.2f}s"
+            f"（预处理 {cls_pre_s:.2f}s + 推理 {cls_inf_s:.2f}s）"
+        )
 
         if len(cls_results) != len(dets):
             raise RuntimeError(
@@ -1109,8 +1187,14 @@ class SahiPipeline:
         for d, r in zip(dets, cls_results):
             d.apply_classifier_result(r, known_classes=known_classes)
 
-        # ── 5. 写出坐标 + 可选可视化 ─────────────────────────────
+        # ── 5. 写出坐标 + 可选 crop / 可视化 ─────────────────────────
         _stage(f"保存 {path.name}", 4)
+        if self.save_crops and crop_bgr:
+            crop_dir = save_crop_images(
+                img_out_dir, crop_bgr, dets, by_class=True,
+            )
+            _log(f"裁剪图已保存: {crop_dir.name}/（按类别子目录）")
+
         boxes = detections_to_opencv_boxes(dets, with_classification=True)
         json_path, csv_path = write_detect_boxes_files(
             img_out_dir, f"{stem}.jpg", detect_size, boxes,
@@ -1125,6 +1209,7 @@ class SahiPipeline:
         stats = self._stats(
             stem, dets, det_time, cls_time, str(img_out_dir), skip_stats,
             boxes_json=str(json_path), boxes_csv=str(csv_path),
+            cls_preprocess_s=cls_pre_s, cls_infer_s=cls_inf_s,
         )
         _log(f"统计: 钻石 {stats['total_diamonds']} 个 | "
              + " | ".join(f"{k}:{v}" for k, v in stats["defect_counts"].items())
@@ -1180,6 +1265,8 @@ class SahiPipeline:
         *,
         boxes_json: str = "",
         boxes_csv: str = "",
+        cls_preprocess_s: float = 0.0,
+        cls_infer_s: float = 0.0,
     ) -> dict:
         """构建统计字典（类别计数按可视化用的最高分类别）。"""
         defect_counts: Dict[str, int] = {}
@@ -1196,6 +1283,8 @@ class SahiPipeline:
             "aspect_skipped": int(skip.get("aspect_skipped", 0)),
             "edge_skipped": int(skip.get("edge_skipped", 0)),
             "detection_time_s": round(det_time, 3),
+            "classification_preprocess_time_s": round(cls_preprocess_s, 3),
+            "classification_infer_time_s": round(cls_infer_s, 3),
             "classification_time_s": round(cls_time, 3),
             "total_time_s": round(det_time + cls_time, 3),
             "output_dir": out_dir,
@@ -1213,6 +1302,8 @@ class SahiPipeline:
             "aspect_skipped": 0,
             "edge_skipped": 0,
             "detection_time_s": 0.0,
+            "classification_preprocess_time_s": 0.0,
+            "classification_infer_time_s": 0.0,
             "classification_time_s": 0.0,
             "total_time_s": 0.0,
             "output_dir": "",
@@ -1227,7 +1318,7 @@ class SahiPipeline:
             writer.writerow([
                 "图像", "钻石数", "缺陷类别分布",
                 "去包含冗余", "去小面积", "去长宽比", "去边缘",
-                "检测耗时(s)", "分类耗时(s)", "总耗时(s)",
+                "检测耗时(s)", "分类预处理(s)", "分类推理(s)", "分类耗时(s)", "总耗时(s)",
             ])
             for s in all_stats:
                 dist = " | ".join(f"{k}:{v}" for k, v in s.get("defect_counts", {}).items())
@@ -1240,6 +1331,8 @@ class SahiPipeline:
                     s.get("aspect_skipped", 0),
                     s.get("edge_skipped", 0),
                     s.get("detection_time_s", 0),
+                    s.get("classification_preprocess_time_s", 0),
+                    s.get("classification_infer_time_s", 0),
                     s.get("classification_time_s", 0),
                     s.get("total_time_s", 0),
                 ])
@@ -1316,6 +1409,8 @@ def detections_to_opencv_boxes(
         if with_classification:
             box["defect_class"] = d.display_class or ""
             box["defect_conf"] = round(float(d.display_conf), 4) if d.display_class else 0.0
+        if d.crop_path:
+            box["crop_path"] = d.crop_path
         boxes.append(box)
     return boxes
 
@@ -1334,6 +1429,7 @@ def write_detect_boxes_files(
     out_dir.mkdir(parents=True, exist_ok=True)
     json_path = out_dir / "detect_boxes.json"
     csv_path = out_dir / "detect_boxes.csv"
+    has_crop = any(bool(b.get("crop_path")) for b in boxes)
 
     payload = {
         "image": image_name,
@@ -1350,22 +1446,27 @@ def write_detect_boxes_files(
         header = ["id", "x1", "y1", "x2", "y2", "det_conf", "defect_class", "defect_conf"]
     else:
         header = ["id", "x1", "y1", "x2", "y2", "det_conf"]
+    if has_crop:
+        header.append("crop_path")
 
     with open(csv_path, "w", newline="", encoding="utf-8-sig") as f:
         writer = csv.writer(f)
         writer.writerow(header)
         for b in boxes:
             if with_classification:
-                writer.writerow([
+                row = [
                     b["id"], b["x1"], b["y1"], b["x2"], b["y2"],
                     b.get("det_conf", ""),
                     b.get("defect_class", ""), b.get("defect_conf", ""),
-                ])
+                ]
             else:
-                writer.writerow([
+                row = [
                     b["id"], b["x1"], b["y1"], b["x2"], b["y2"],
                     b.get("det_conf", ""),
-                ])
+                ]
+            if has_crop:
+                row.append(b.get("crop_path", ""))
+            writer.writerow(row)
 
     return json_path, csv_path
 
@@ -1387,6 +1488,8 @@ class SahiDetectOnlyPipeline:
         downsample_max_side: int = 2560,
         downsample_interpolation: str = "area",
         save_visualization: bool = False,
+        save_crops: bool = False,
+        crop_padding: int = 15,
     ):
         self.detector = detector
         self.output_dir = Path(output_dir)
@@ -1394,6 +1497,8 @@ class SahiDetectOnlyPipeline:
         self.downsample_max_side = int(downsample_max_side)
         self.downsample_interpolation = downsample_interpolation or "area"
         self.save_visualization = bool(save_visualization)
+        self.save_crops = bool(save_crops)
+        self.crop_padding = int(crop_padding)
 
     def process_image(
         self,
@@ -1458,6 +1563,18 @@ class SahiDetectOnlyPipeline:
             cv2.imwrite(downsampled_path, detect_img, [int(cv2.IMWRITE_JPEG_QUALITY), 92])
             _log(f"下采样图已保存: {downsampled_path}")
 
+        if self.save_crops and dets:
+            crop_bgr = [
+                crop_with_padding(
+                    detect_img, d.x1, d.y1, d.x2, d.y2, self.crop_padding,
+                )
+                for d in dets
+            ]
+            crop_dir = save_crop_images(
+                img_out_dir, crop_bgr, dets, by_class=False,
+            )
+            _log(f"裁剪图已保存: {crop_dir.name}/")
+
         boxes = detections_to_opencv_boxes(dets, with_classification=False)
         json_path, csv_path = write_detect_boxes_files(
             img_out_dir,
@@ -1483,6 +1600,8 @@ class SahiDetectOnlyPipeline:
             "aspect_skipped": int(skip_stats.get("aspect_skipped", 0)),
             "edge_skipped": int(skip_stats.get("edge_skipped", 0)),
             "detection_time_s": round(det_time, 3),
+            "classification_preprocess_time_s": 0.0,
+            "classification_infer_time_s": 0.0,
             "classification_time_s": 0.0,
             "total_time_s": round(det_time, 3),
             "output_dir": str(img_out_dir),
@@ -1508,6 +1627,8 @@ class SahiDetectOnlyPipeline:
             "aspect_skipped": 0,
             "edge_skipped": 0,
             "detection_time_s": 0.0,
+            "classification_preprocess_time_s": 0.0,
+            "classification_infer_time_s": 0.0,
             "classification_time_s": 0.0,
             "total_time_s": 0.0,
             "output_dir": out_dir,

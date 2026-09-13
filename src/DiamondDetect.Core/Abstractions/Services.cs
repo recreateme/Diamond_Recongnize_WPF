@@ -36,7 +36,7 @@ public sealed class SahiRunOptions
     public bool EdgeFilter { get; init; } = true;
     public int EdgeMarginPx { get; init; } = 20;
 
-    /// <summary>仅 SAHI 检测定位，不分类、不写 crops/可视化/summary。</summary>
+    /// <summary>仅 SAHI 检测定位，不分类、不写 summary。</summary>
     public bool DetectOnly { get; init; }
 
     /// <summary>检测前将最长边缩放到 DownsampleMaxSide（仅当源图更大时）。</summary>
@@ -49,6 +49,9 @@ public sealed class SahiRunOptions
 
     /// <summary>勾选后在输出子目录写入可视化 JPEG（完整模式：分类着色；仅检测：绿框）。</summary>
     public bool SaveVisualization { get; init; }
+
+    /// <summary>勾选后在每图输出目录写 crop/；完整模式按类别分子目录。</summary>
+    public bool SaveCrops { get; init; }
 }
 
 public sealed class SahiImageStats
@@ -57,6 +60,8 @@ public sealed class SahiImageStats
     public int TotalDiamonds { get; set; }
     public Dictionary<string, int> DefectCounts { get; set; } = new();
     public double DetectionTimeS { get; set; }
+    public double ClassificationPreprocessTimeS { get; set; }
+    public double ClassificationInferTimeS { get; set; }
     public double ClassificationTimeS { get; set; }
     public double TotalTimeS { get; set; }
     public string OutputDir { get; set; } = "";
@@ -134,6 +139,18 @@ public sealed class UniformityScoreRow
     public double? GridDensityCv { get; set; }
     public string Status { get; set; } = "";
     public string ConfFilter { get; set; } = "";
+
+    // 友好百分比指标（Christiansen 均匀系数 CU / 低四分位分布均匀度 DUlq），
+    // 与上面的原始 CV/R 并列展示，不互相替代：CU/DUlq 给人看，CV/R 给后续
+    // 人工标注 + 自动定阈值用。只在 raw（未做尺寸归一化）数组上算。
+    public double? VoronoiAreaCu { get; set; }
+    public double? VoronoiAreaDuLq { get; set; }
+    public double? NnDistanceCu { get; set; }
+    public double? NnDistanceDuLq { get; set; }
+    public double? DelaunayEdgeCu { get; set; }
+    public double? DelaunayEdgeDuLq { get; set; }
+    public double? GridDensityCu { get; set; }
+    public double? GridDensityDuLq { get; set; }
 }
 
 public sealed class UniformityTileInfo
