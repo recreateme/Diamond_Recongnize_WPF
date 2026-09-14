@@ -5,13 +5,17 @@
 ================================================================================
 
 【架构概览】
-  · 模型  : MobileNetV3-Small（本地 ImageNet 预训练，真 3 类：棱边/点/面朝上）
+  · 模型  : EfficientNetV2-S（本地 ImageNet 预训练，真 3 类：棱边/点/面朝上）
   · 策略  : 两阶段微调
             阶段一 — 冻结 Backbone，仅训练分类头
-            阶段二 — 解冻全部层，统一小学习率 + CosineAnnealing
+            阶段二 — 解冻卷积，冻结 BN（eval）+ 统一小学习率 + CosineAnnealing
   · 增强  : 默认原始裁剪图（Letterbox + 在线增强 + WeightedRandomSampler）
-  · 不均衡: Sampler + Focal + 类别权重；以 val_macro_f1 选最优
+  · 不均衡: Sampler + 类别权重；默认 CE+label_smoothing（可选 Focal）
+  · 选模  : val_macro_f1
   · 导出  : best_model.pt + model.onnx（不再生成 class_thresholds.json）
+  · 日志  : training.log / training_log.csv / training_history.json
+            + training_curves.png（损失/精度/F1/LR）+ confusion_matrix.png
+            + classification_report.txt
 
 【路径约定】
   PROJECT_ROOT = python_core/。相对路径相对本目录解析；仓库根数据用 ../data。
@@ -294,21 +298,25 @@ def get_args() -> argparse.Namespace:
     p.add_argument("--val_ratio",      type=float, default=0.15,
                    help="验证集比例（0~1）")
     # 训练
-    p.add_argument("--batch_size",     type=int,   default=32,
+    p.add_argument("--batch_size",     type=int,   default=16,
                    help="批大小")
     p.add_argument("--epochs_phase1",  type=int,   default=10,
                    help="阶段一：冻结 Backbone，只训练分类头")
-    p.add_argument("--epochs_phase2",  type=int,   default=50,
+    p.add_argument("--epochs_phase2",  type=int,   default=40,
                    help="阶段二：解冻全部层，端到端微调")
     p.add_argument("--lr_phase1",      type=float, default=1e-3)
-    p.add_argument("--lr_phase2",      type=float, default=1e-5,
+    p.add_argument("--lr_phase2",      type=float, default=5e-5,
                    help="阶段二统一学习率（小数据集宜偏低）")
+    p.add_argument("--weight_decay",   type=float, default=0.01,
+                   help="AdamW weight_decay")
     p.add_argument("--label_smooth",   type=float, default=0.1,
                    help="Label Smoothing，小样本防过拟合")
     p.add_argument("--mixup_alpha",    type=float, default=0,
                    help="MixUp alpha，0 表示关闭（缺陷分类默认关闭）")
-    p.add_argument("--patience",       type=int,   default=0,
-                   help="Early Stopping 耐心轮数；0 表示关闭（跑满阶段 epoch）")
+    p.add_argument("--patience",       type=int,   default=12,
+                   help="Early Stopping 耐心轮数；0 表示关闭（跑满阶段 epoch）。"
+                        "默认12：macro-F1 通常在20~30轮后不再提升，早停可省后段陪跑"
+                        "（不影响最终精度——best_model.pt 始终按最优 macro-F1 保存）")
     p.add_argument("--pre_augmented",  action="store_true", default=False,
                    help="数据已离线增强：轻量在线增强 + shuffle")
     p.add_argument("--no_pre_augmented", dest="pre_augmented", action="store_false",
@@ -318,10 +326,10 @@ def get_args() -> argparse.Namespace:
                    help="损失函数中加入逆频类别权重（默认开启）")
     p.add_argument("--no_class_weight", dest="use_class_weight", action="store_false",
                    help="关闭损失函数类别加权")
-    p.add_argument("--use_focal_loss", action="store_true", default=True,
-                   help="使用 Focal Loss 替换 CrossEntropy（默认开启）")
+    p.add_argument("--use_focal_loss", action="store_true", default=False,
+                   help="使用 Focal Loss 替换 CrossEntropy")
     p.add_argument("--no_focal_loss", dest="use_focal_loss", action="store_false",
-                   help="关闭 Focal Loss，改用加权 CrossEntropy")
+                   help="关闭 Focal Loss，改用加权 CrossEntropy（默认）")
     p.add_argument("--focal_gamma", type=float, default=2.0,
                    help="Focal Loss γ 参数（越大越聚焦难样本，默认 2.0）")
     p.add_argument("--extra_data_dirs", nargs="*", default=[],
@@ -348,7 +356,7 @@ def get_args() -> argparse.Namespace:
     p.add_argument("--no_pretrained", dest="pretrained", action="store_false",
                    help="随机初始化 Backbone")
     p.add_argument("--pretrained_weights", type=str, default="",
-                   help="MobileNetV3-Small 预训练权重路径（默认 checkpoints/pretrained/...）")
+                   help="EfficientNetV2-S 预训练权重路径（默认 checkpoints/pretrained/...）")
     p.add_argument("--postprocess_only", action="store_true",
                    help="跳过训练，仅加载 best_model.pt 做 ONNX 导出")
     return p.parse_args()
@@ -638,10 +646,10 @@ def build_model(
     pretrained: bool = True,
     weights_path: Optional[Path] = None,
 ) -> nn.Module:
-    """构建 MobileNetV3-Small + 自定义末层分类头。"""
-    from model_builder import build_mobilenet_v3_small
+    """构建 EfficientNetV2-S + 自定义末层分类头。"""
+    from model_builder import build_efficientnet_v2_s
 
-    return build_mobilenet_v3_small(
+    return build_efficientnet_v2_s(
         num_classes, pretrained=pretrained, weights_path=weights_path
     )
 
@@ -657,6 +665,28 @@ def unfreeze_all(model: nn.Module):
     """解冻全部参数。"""
     for param in model.parameters():
         param.requires_grad = True
+
+
+def freeze_batchnorm(model: nn.Module) -> int:
+    """
+    冻结所有 BatchNorm：requires_grad=False，并切到 eval（用运行均值/方差）。
+    返回被冻结的 BN 模块数。
+    """
+    n = 0
+    for m in model.modules():
+        if isinstance(m, (nn.BatchNorm1d, nn.BatchNorm2d, nn.SyncBatchNorm)):
+            m.eval()
+            for p in m.parameters():
+                p.requires_grad = False
+            n += 1
+    return n
+
+
+def apply_frozen_bn_eval(model: nn.Module) -> None:
+    """model.train() 之后再次强制 BN 保持 eval。"""
+    for m in model.modules():
+        if isinstance(m, (nn.BatchNorm1d, nn.BatchNorm2d, nn.SyncBatchNorm)):
+            m.eval()
 
 
 def count_params(model: nn.Module) -> Tuple[int, int]:
@@ -728,6 +758,7 @@ def mixup_loss(criterion, pred, y_a, y_b, lam):
 def train_one_epoch(
     model, loader, criterion, optimizer, scaler, device,
     mixup_alpha: float = 0.0,
+    freeze_bn: bool = False,
 ) -> Tuple[float, float]:
     """
     单 epoch 训练。返回 (平均 loss, 准确率)。
@@ -735,8 +766,11 @@ def train_one_epoch(
     · AMP: scaler 非 None 时启用混合精度（仅 CUDA）
     · MixUp: mixup_alpha>0 时混合样本与标签（缺陷分类默认关闭）
     · 梯度裁剪 max_norm=1.0 防止小 batch 下梯度爆炸
+    · freeze_bn: 为 True 时在 model.train() 后强制 BN 保持 eval
     """
     model.train()
+    if freeze_bn:
+        apply_frozen_bn_eval(model)
     total_loss, correct, total = 0.0, 0, 0
 
     for imgs, labels in loader:
@@ -815,45 +849,151 @@ def validate(
 # 可视化
 # ═══════════════════════════════════════════════
 def plot_training_curves(history: dict, save_dir: Path):
+    """保存训练曲线：损失 / 准确率 / Macro-F1（及可选学习率）。"""
     if not HAS_MPL:
         return
-    fig, axes = plt.subplots(1, 2, figsize=(12, 4))
-    fig.suptitle("训练曲线", fontsize=13, fontweight="bold")
+    if not history.get("train_loss"):
+        print("  [跳过] 无 epoch 历史，不生成训练曲线")
+        return
 
-    # Loss
+    has_lr = bool(history.get("lr"))
+    ncols = 4 if has_lr else 3
+    fig, axes = plt.subplots(1, ncols, figsize=(4.2 * ncols, 4.2))
+    fig.suptitle("训练曲线（损失 / 精度 / Macro-F1）", fontsize=13, fontweight="bold")
+    epochs = list(range(1, len(history["train_loss"]) + 1))
+    phase_split = history.get("phase_split") or 0
+
+    def _mark_phase(ax):
+        if phase_split and phase_split < len(epochs):
+            ax.axvline(
+                phase_split + 0.5, color="gray", linestyle="--",
+                linewidth=1, label="阶段一/二",
+            )
+
     ax = axes[0]
-    ax.plot(history["train_loss"], label="训练损失", linewidth=1.5)
-    ax.plot(history["val_loss"],   label="验证损失", linewidth=1.5)
-    # 标记阶段分界
-    if "phase_split" in history:
-        ax.axvline(history["phase_split"], color="gray", linestyle="--",
-                   linewidth=1, label="阶段一/二分界")
+    ax.plot(epochs, history["train_loss"], label="训练损失", linewidth=1.5)
+    ax.plot(epochs, history["val_loss"], label="验证损失", linewidth=1.5)
+    _mark_phase(ax)
     ax.set_xlabel("Epoch")
     ax.set_ylabel("Loss")
     ax.set_title("损失")
-    ax.legend()
+    ax.legend(fontsize=8)
     ax.grid(alpha=0.3)
 
-    # Accuracy + Macro-F1
     ax = axes[1]
-    ax.plot(history["train_acc"], label="训练准确率", linewidth=1.5)
-    ax.plot(history["val_acc"],   label="验证准确率", linewidth=1.5)
-    if history.get("val_f1"):
-        ax.plot(history["val_f1"], label="验证 Macro-F1",
-                linewidth=1.8, linestyle="--", color="#E64A19")
-    if "phase_split" in history:
-        ax.axvline(history["phase_split"], color="gray", linestyle="--", linewidth=1)
+    ax.plot(epochs, history["train_acc"], label="训练准确率", linewidth=1.5)
+    ax.plot(epochs, history["val_acc"], label="验证准确率", linewidth=1.5)
+    _mark_phase(ax)
     ax.set_xlabel("Epoch")
-    ax.set_ylabel("Score")
-    ax.set_title("准确率 / Macro-F1（红虚线为选模型依据）")
-    ax.legend()
+    ax.set_ylabel("Accuracy")
+    ax.set_title("准确率")
+    ax.legend(fontsize=8)
     ax.grid(alpha=0.3)
+
+    ax = axes[2]
+    ax.plot(
+        epochs, history["val_f1"], label="验证 Macro-F1",
+        linewidth=1.8, color="#E64A19",
+    )
+    best_f1 = max(history["val_f1"]) if history["val_f1"] else 0.0
+    best_ep = int(np.argmax(history["val_f1"])) + 1 if history["val_f1"] else 0
+    if best_ep:
+        ax.axvline(
+            best_ep, color="#E64A19", linestyle=":", linewidth=1,
+            label=f"最佳 Ep{best_ep} ({best_f1:.3f})",
+        )
+    _mark_phase(ax)
+    ax.set_xlabel("Epoch")
+    ax.set_ylabel("Macro-F1")
+    ax.set_title("验证 Macro-F1（选模指标）")
+    ax.legend(fontsize=8)
+    ax.grid(alpha=0.3)
+
+    if has_lr:
+        ax = axes[3]
+        ax.plot(epochs, history["lr"], label="学习率", linewidth=1.5, color="#1565C0")
+        _mark_phase(ax)
+        ax.set_xlabel("Epoch")
+        ax.set_ylabel("LR")
+        ax.set_title("学习率")
+        ax.set_yscale("log")
+        ax.legend(fontsize=8)
+        ax.grid(alpha=0.3)
 
     plt.tight_layout()
     out = save_dir / "training_curves.png"
-    fig.savefig(out, dpi=150, bbox_inches="tight")
+    try:
+        fig.savefig(out, dpi=150, bbox_inches="tight")
+    except OSError as e:
+        alt = save_dir / "training_curves_new.png"
+        print(f"  [警告] 无法写入 {out.name}: {e}；改写 {alt.name}")
+        fig.savefig(alt, dpi=150, bbox_inches="tight")
+        out = alt
     plt.close(fig)
     print(f"  训练曲线已保存   → {out}")
+
+
+def save_training_log_artifacts(history: dict, save_dir: Path) -> None:
+    """写出 training_log.csv + training_history.json。"""
+    import csv
+
+    n = len(history.get("train_loss") or [])
+    if n == 0:
+        return
+
+    csv_path = save_dir / "training_log.csv"
+    fieldnames = [
+        "epoch", "phase", "lr",
+        "train_loss", "val_loss",
+        "train_acc", "val_acc", "val_macro_f1",
+        "elapsed_s", "best_so_far",
+    ]
+    with open(csv_path, "w", newline="", encoding="utf-8-sig") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for i in range(n):
+            writer.writerow({
+                "epoch": history.get("epoch", list(range(1, n + 1)))[i],
+                "phase": (history.get("phase") or [""] * n)[i],
+                "lr": (history.get("lr") or [""] * n)[i],
+                "train_loss": history["train_loss"][i],
+                "val_loss": history["val_loss"][i],
+                "train_acc": history["train_acc"][i],
+                "val_acc": history["val_acc"][i],
+                "val_macro_f1": history["val_f1"][i],
+                "elapsed_s": (history.get("elapsed_s") or [""] * n)[i],
+                "best_so_far": (history.get("best_so_far") or [""] * n)[i],
+            })
+    print(f"  训练日志 CSV     → {csv_path}")
+
+    json_path = save_dir / "training_history.json"
+    payload = {
+        "phase_split": history.get("phase_split", 0),
+        "epochs": history.get("epoch", list(range(1, n + 1))),
+        "phase": history.get("phase", []),
+        "lr": history.get("lr", []),
+        "train_loss": history["train_loss"],
+        "val_loss": history["val_loss"],
+        "train_acc": history["train_acc"],
+        "val_acc": history["val_acc"],
+        "val_macro_f1": history["val_f1"],
+        "elapsed_s": history.get("elapsed_s", []),
+        "best_so_far": history.get("best_so_far", []),
+        "best_macro_f1": max(history["val_f1"]) if history["val_f1"] else None,
+        "best_epoch": (
+            int(np.argmax(history["val_f1"])) + 1 if history["val_f1"] else None
+        ),
+    }
+    with open(json_path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+    print(f"  训练历史 JSON    → {json_path}")
+
+
+def append_training_log_line(save_dir: Path, line: str) -> None:
+    """追加一行到 save_dir/training.log。"""
+    log_path = save_dir / "training.log"
+    with open(log_path, "a", encoding="utf-8") as f:
+        f.write(line.rstrip() + "\n")
 
 
 def plot_confusion_matrix(
@@ -1111,7 +1251,7 @@ class TrainingPipeline:
         if a.resume_path and a.pretrained:
             print(f"\n  Backbone: 从 checkpoint 加载（忽略本地预训练）")
         elif use_pretrained:
-            print(f"\n  Backbone: 本地 ImageNet 预训练 (MobileNetV3-Small)")
+            print(f"\n  Backbone: 本地 ImageNet 预训练 (EfficientNetV2-S)")
         else:
             print(f"\n  Backbone: 随机初始化")
 
@@ -1126,8 +1266,8 @@ class TrainingPipeline:
             self.resume_meta = load_checkpoint(
                 self.model, a.resume_path, self.device, self.classes
             )
-            if a.resume_path == self.best_ckpt_path and a.resume_meta.get("macro_f1"):
-                self.best_macro_f1 = float(a.resume_meta["macro_f1"])
+            if a.resume_path == self.best_ckpt_path and self.resume_meta.get("macro_f1"):
+                self.best_macro_f1 = float(self.resume_meta["macro_f1"])
 
     def setup_criterion(self) -> None:
         a = self.args
@@ -1149,32 +1289,30 @@ class TrainingPipeline:
             print(f"  混合精度: 启用 (AMP)")
 
         self.history = {
+            "epoch": [], "phase": [], "lr": [],
             "train_loss": [], "val_loss": [],
             "train_acc": [], "val_acc": [],
-            "val_f1": [], "phase_split": a.epochs_phase1,
+            "val_f1": [], "elapsed_s": [], "best_so_far": [],
+            "phase_split": a.epochs_phase1,
         }
 
     def _run_epoch(
         self, epoch: int, total_epochs: int, phase_label: str,
-        optimizer, scheduler,
+        optimizer, scheduler, *, freeze_bn: bool = False,
     ) -> Tuple[np.ndarray, np.ndarray]:
         a = self.args
         t0 = time.time()
+        lr = float(optimizer.param_groups[0]["lr"])
         train_loss, train_acc = train_one_epoch(
             self.model, self.train_loader, self.criterion,
             optimizer, self.scaler, self.device,
             mixup_alpha=a.mixup_alpha,
+            freeze_bn=freeze_bn,
         )
         val_loss, val_acc, macro_f1, val_preds, val_labels = validate(
             self.model, self.val_loader, self.criterion, self.device,
         )
         elapsed = time.time() - t0
-
-        self.history["train_loss"].append(train_loss)
-        self.history["val_loss"].append(val_loss)
-        self.history["train_acc"].append(train_acc)
-        self.history["val_acc"].append(val_acc)
-        self.history["val_f1"].append(macro_f1)
 
         improved = macro_f1 > self.best_macro_f1
         if improved:
@@ -1194,13 +1332,27 @@ class TrainingPipeline:
         else:
             self.no_improve += 1
 
+        self.history["epoch"].append(epoch)
+        self.history["phase"].append(phase_label)
+        self.history["lr"].append(lr)
+        self.history["train_loss"].append(train_loss)
+        self.history["val_loss"].append(val_loss)
+        self.history["train_acc"].append(train_acc)
+        self.history["val_acc"].append(val_acc)
+        self.history["val_f1"].append(macro_f1)
+        self.history["elapsed_s"].append(round(elapsed, 2))
+        self.history["best_so_far"].append(round(self.best_macro_f1, 6))
+
         marker = "★" if improved else " "
-        print(
+        line = (
             f"  [{phase_label}] Ep {epoch:>3}/{total_epochs}  "
+            f"lr {lr:.2e}  "
             f"loss {train_loss:.4f}/{val_loss:.4f}  "
             f"acc {train_acc:.3f}/{val_acc:.3f}  "
             f"F1 {macro_f1:.3f}  {elapsed:.1f}s  {marker}"
         )
+        print(line)
+        append_training_log_line(self.save_dir, line.strip())
         scheduler.step()
         return val_preds, val_labels
 
@@ -1211,6 +1363,15 @@ class TrainingPipeline:
         阶段二：全部参数统一 lr_phase2 + CosineAnnealing。
         """
         a = self.args
+        log_path = self.save_dir / "training.log"
+        with open(log_path, "w", encoding="utf-8") as f:
+            f.write(
+                f"# training start  device={self.device}  "
+                f"img_size={a.img_size}  batch={a.batch_size}\n"
+                f"# metric=val_macro_f1  patience={a.patience}\n"
+            )
+        print(f"\n  训练日志     → {log_path}")
+
         if a.patience <= 0:
             print("\n  Early Stopping: 关闭（跑满设定 epoch）")
         else:
@@ -1226,7 +1387,7 @@ class TrainingPipeline:
 
             optimizer = optim.AdamW(
                 filter(lambda p: p.requires_grad, self.model.parameters()),
-                lr=a.lr_phase1, weight_decay=1e-4,
+                lr=a.lr_phase1, weight_decay=a.weight_decay,
             )
             scheduler = optim.lr_scheduler.CosineAnnealingLR(
                 optimizer, T_max=a.epochs_phase1, eta_min=a.lr_phase1 * 0.1,
@@ -1241,15 +1402,18 @@ class TrainingPipeline:
         if a.epochs_phase2 > 0:
             print(f"\n{'─'*58}")
             print(f"  阶段二：端到端微调  ({a.epochs_phase2} epochs, lr={a.lr_phase2})")
+            print(f"  BatchNorm: 冻结（eval / 不更新统计量）")
             print(f"{'─'*58}")
             unfreeze_all(self.model)
+            n_bn = freeze_batchnorm(self.model)
+            print(f"  已冻结 BN 模块: {n_bn}")
             total, trainable = count_params(self.model)
             print(f"  可训练参数: {trainable:,} / {total:,}")
 
             optimizer = optim.AdamW(
-                self.model.parameters(),
+                filter(lambda p: p.requires_grad, self.model.parameters()),
                 lr=a.lr_phase2,
-                weight_decay=1e-4,
+                weight_decay=a.weight_decay,
             )
             scheduler = optim.lr_scheduler.CosineAnnealingLR(
                 optimizer, T_max=a.epochs_phase2, eta_min=a.lr_phase2 * 0.05,
@@ -1258,7 +1422,7 @@ class TrainingPipeline:
             for ep in range(1, a.epochs_phase2 + 1):
                 self._run_epoch(
                     offset + ep, offset + a.epochs_phase2, "P2",
-                    optimizer, scheduler,
+                    optimizer, scheduler, freeze_bn=True,
                 )
                 if a.patience > 0 and self.no_improve >= a.patience:
                     print(f"  Early stopping @ epoch {offset + ep}")
@@ -1287,11 +1451,26 @@ class TrainingPipeline:
         print(f"  最终 Macro-F1  : {final_f1:.4f}")
 
         if HAS_SKLEARN:
-            print("\n" + classification_report(
+            report = classification_report(
                 final_labels, final_preds,
                 target_names=self.classes, digits=4, zero_division=0,
-            ))
+            )
+            print("\n" + report)
+            report_path = self.save_dir / "classification_report.txt"
+            with open(report_path, "w", encoding="utf-8") as f:
+                f.write(
+                    f"best_macro_f1={final_f1:.6f}\n"
+                    f"best_val_acc={final_acc:.6f}\n\n"
+                )
+                f.write(report)
+            print(f"  分类报告已保存  → {report_path}")
+            append_training_log_line(
+                self.save_dir,
+                f"# finalize  best_macro_f1={final_f1:.6f}  "
+                f"best_val_acc={final_acc:.6f}",
+            )
 
+        save_training_log_artifacts(self.history, self.save_dir)
         plot_training_curves(self.history, self.save_dir)
         plot_confusion_matrix(
             final_preds, final_labels, self.classes, self.save_dir,

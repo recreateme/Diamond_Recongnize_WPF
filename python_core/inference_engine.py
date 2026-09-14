@@ -31,7 +31,7 @@ from inference_common import (
     read_model_meta,
     run_batch_predict,
 )
-from model_builder import build_mobilenet_v3_small
+from model_builder import build_efficientnet_v2_s
 
 try:
     import onnxruntime as ort
@@ -85,7 +85,13 @@ class InferenceEngine:
     ) -> str:
         self.loaded = False
 
-        gpu_ok = use_gpu and torch.cuda.is_available()
+        gpu_detail: Optional[str] = None
+        if use_gpu:
+            from inference_common import check_cuda_arch_compatible
+
+            gpu_ok, gpu_detail = check_cuda_arch_compatible()
+        else:
+            gpu_ok = False
         onnx_ok = bool(onnx_path and Path(onnx_path).exists() and HAS_ORT)
 
         if gpu_ok:
@@ -134,10 +140,15 @@ class InferenceEngine:
             dev_str = f"GPU ({torch.cuda.get_device_name(0)})"
         else:
             dev_str = "CPU"
-        return (
+        msg = (
             f"模型加载成功  [{self.backend.upper()} / {dev_str}]  "
             f"{len(self.classes)} 类别 · {self.img_size}px · batch={self._batch_size}"
         )
+        # use_gpu=True 但实际没用上GPU时，把原因带出来（不可用/架构不兼容），
+        # 避免用户看到"怎么还是CPU"却不知道为什么。
+        if use_gpu and target_device != "cuda" and gpu_detail:
+            msg += f"（{gpu_detail}，已使用CPU）"
+        return msg
 
     def reload(self) -> str:
         use_gpu = self.device == "cuda"
@@ -353,4 +364,4 @@ class InferenceEngine:
 
     @staticmethod
     def _build_model(num_classes: int) -> nn.Module:
-        return build_mobilenet_v3_small(num_classes, pretrained=False)
+        return build_efficientnet_v2_s(num_classes, pretrained=False)

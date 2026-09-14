@@ -1,0 +1,12 @@
+best_macro_f1=0.817711
+best_val_acc=0.839286
+
+              precision    recall  f1-score   support
+
+        棱边朝上     0.9167    0.8148    0.8627        27
+         点朝上     0.6154    0.8000    0.6957        10
+         面朝上     0.8947    0.8947    0.8947        19
+
+    accuracy                         0.8393        56
+   macro avg     0.8089    0.8365    0.8177        56
+weighted avg     0.8554    0.8393    0.8438        56

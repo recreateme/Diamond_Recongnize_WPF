@@ -493,13 +493,14 @@ def resolve_yolo_device(requested: str) -> Tuple[str, Optional[str]]:
     """
     解析 YOLO 推理设备，并在 auto 模式下对不兼容 GPU 自动回退 CPU。
 
-    torch.cuda.is_available() 在 RTX 50 系列（sm_120）等新型号上可能为 True，
-    但实际执行 kernel 会报 cudaErrorUnknown；此处用 get_arch_list 与算力比对规避。
+    底层 GPU 可用性检测（含架构兼容性校验）复用
+    inference_common.check_cuda_arch_compatible()，与分类模型的两条推理路径
+    共用同一份实现，避免三处逻辑各自维护、成熟度不一致。
 
     Returns:
         (device, warning_or_none)
     """
-    import torch
+    from inference_common import check_cuda_arch_compatible
 
     req = (requested or "auto").strip().lower()
     want_cuda = req in ("auto", "cuda", "cuda:0") or req.startswith("cuda")
@@ -507,39 +508,24 @@ def resolve_yolo_device(requested: str) -> Tuple[str, Optional[str]]:
     if not want_cuda:
         return "cpu", None
 
-    if not torch.cuda.is_available():
-        msg = "CUDA 不可用"
-        if req == "auto":
-            return "cpu", f"{msg}，已自动使用 CPU 推理"
-        raise RuntimeError(f"{msg}。请在「设置 → 切片推理配置」中将设备改为 cpu。")
-
-    try:
-        cap = torch.cuda.get_device_capability(0)
-        name = torch.cuda.get_device_name(0)
-        sm = f"sm_{cap[0]}{cap[1]}"
-        archs = getattr(torch.cuda, "get_arch_list", lambda: [])() or []
-        if archs and sm not in archs:
-            detail = (
-                f"GPU {name}（{sm}）不受当前 PyTorch {torch.__version__} 支持"
-                f"（已编译: {', '.join(archs)}）"
-            )
+    usable, detail = check_cuda_arch_compatible()
+    if not usable:
+        if detail == "CUDA 不可用":
             if req == "auto":
-                return "cpu", (
-                    f"{detail}。"
-                    "已自动回退到 CPU 推理（速度较慢）。"
-                    "如需 GPU 加速，请安装支持 sm_120 的 PyTorch nightly/cu128+。"
-                )
-            raise RuntimeError(
-                f"{detail}。"
-                "请在「设置 → 切片推理配置」中将设备改为 auto 或 cpu，"
-                "或升级 PyTorch 至支持 Blackwell 架构的版本。"
-            )
-    except RuntimeError:
-        raise
-    except Exception as exc:
+                return "cpu", f"{detail}，已自动使用 CPU 推理"
+            raise RuntimeError(f"{detail}。请在「设置 → 切片推理配置」中将设备改为 cpu。")
+        # 架构不兼容 / 检测失败
         if req == "auto":
-            return "cpu", f"CUDA 检测失败（{exc}），已自动使用 CPU 推理"
-        raise RuntimeError(f"CUDA 检测失败: {exc}") from exc
+            return "cpu", (
+                f"{detail}。"
+                "已自动回退到 CPU 推理（速度较慢）。"
+                "如需 GPU 加速，请安装支持该架构的 PyTorch nightly/cu128+。"
+            )
+        raise RuntimeError(
+            f"{detail}。"
+            "请在「设置 → 切片推理配置」中将设备改为 auto 或 cpu，"
+            "或升级 PyTorch 至支持该架构的版本。"
+        )
 
     device = req if req.startswith("cuda") else "cuda:0"
     return device, None

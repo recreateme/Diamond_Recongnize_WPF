@@ -45,12 +45,12 @@ public partial class RetrainViewModel : ObservableObject
     [ObservableProperty] private string unlockButtonText = "输入密码解锁";
     [ObservableProperty] private bool formEnabled;
     [ObservableProperty] private string statsText = "点击「刷新统计」查看数据情况";
-    [ObservableProperty] private string modelArch = "MobileNetV3-Small";
+    [ObservableProperty] private string modelArch = "EfficientNetV2-S";
     [ObservableProperty] private int imgSize = 256;
     [ObservableProperty] private int epochsPhase1 = 10;
-    [ObservableProperty] private int epochsPhase2 = 50;
+    [ObservableProperty] private int epochsPhase2 = 40;
     [ObservableProperty] private double lrPhase1 = 1e-3;
-    [ObservableProperty] private double lrPhase2 = 1e-5;
+    [ObservableProperty] private double lrPhase2 = 5e-5;
     [ObservableProperty] private int batchSize = 16;
     [ObservableProperty] private bool isTraining;
     [ObservableProperty] private bool canApply;
@@ -145,7 +145,12 @@ public partial class RetrainViewModel : ObservableObject
             "--epochs_phase2", EpochsPhase2.ToString(),
             "--lr_phase1", LrPhase1.ToString("G", System.Globalization.CultureInfo.InvariantCulture),
             "--lr_phase2", LrPhase2.ToString("G", System.Globalization.CultureInfo.InvariantCulture),
-            "--patience", "0",
+            // 早停耐心轮数：与 train.py 的默认值保持一致（见 train.py --patience
+            // 说明）——训练曲线显示 macro-F1 通常20~30轮后就不再提升，早停可以
+            // 省下后段陪跑的训练时间，不影响最终精度（best_model.pt 始终按最优
+            // macro-F1 保存）。这里显式传参而不是依赖 Python 侧默认值，避免以后
+            // 两边其中一个改了默认值又不同步。
+            "--patience", "12",
             "--save_dir", saveDir,
             "--num_workers", "0",
             "--no_pre_augmented",

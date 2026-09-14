@@ -10,6 +10,8 @@
   · run_batch_predict / predict_bgr_crops_timed — 批量推理（可拆预处理/推理耗时）
   · logits_row_to_result / build_result_dict — 单张/批量统一结果结构
   · ImageNet 归一化常量
+  · check_cuda_arch_compatible — GPU 可用性检测（含架构兼容性校验），
+    YOLO检测(sahi_detector) / 开发版分类 / 机台ONNX分类三处共用同一份实现
 
 避免两处引擎逻辑漂移；修改预处理/阈值/批量逻辑时只改此处。
 """
@@ -18,6 +20,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 import time
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -35,6 +38,64 @@ EXCLUDED_CLASSES = frozenset({"局部破损", "断钻"})
 
 # SAHI 裁剪 letterbox 并行线程数（cv2 段可释放 GIL）
 _PREPROCESS_WORKERS = max(1, min(8, (os.cpu_count() or 4)))
+
+# 预处理线程池：进程内常驻、惰性创建，避免每次调用 preprocess_bgr_crops_to_chw
+# 都新建/销毁一个 ThreadPoolExecutor（SAHI 批处理时每张大图都会调用一次，
+# 反复创建线程池的固定开销会累积成一个不小的成本）。
+_preprocess_pool_lock = threading.Lock()
+_preprocess_pool = None
+
+
+def _get_preprocess_pool():
+    """返回复用的预处理线程池，首次调用时创建，之后常驻复用。"""
+    global _preprocess_pool
+    if _preprocess_pool is None:
+        with _preprocess_pool_lock:
+            if _preprocess_pool is None:
+                from concurrent.futures import ThreadPoolExecutor
+
+                _preprocess_pool = ThreadPoolExecutor(
+                    max_workers=_PREPROCESS_WORKERS, thread_name_prefix="preprocess"
+                )
+    return _preprocess_pool
+
+
+def check_cuda_arch_compatible() -> Tuple[bool, Optional[str]]:
+    """检测 CUDA 是否真正可用——不只是 torch.cuda.is_available()，还核实当前
+    PyTorch build 是否支持这块 GPU 的计算架构。
+
+    torch.cuda.is_available() 在 RTX 50 系列（sm_120）等新型号上可能为 True，
+    但实际执行 kernel 会报 cudaErrorUnknown；这里用 get_arch_list 与算力比对
+    规避这个问题。YOLO检测（sahi_detector.resolve_yolo_device）、开发版分类
+    （inference_engine）、机台ONNX分类（inference_engine_onnx）三处推理路径
+    共用这一份实现，避免各自维护一份检测逻辑、成熟度不一致——本来只有YOLO那
+    条路径做了这层校验，分类的两条推理路径都还是天真检测，统一到这里以后，
+    以后再遇到新的 GPU 代际兼容性问题，只需要改一处。
+
+    Returns:
+        (usable, detail) —— usable=False 时，detail 给出人类可读的不可用原因
+        （CUDA不可用 / 架构不兼容 / 检测失败 三种情况都有对应文案）；
+        usable=True 时 detail 恒为 None。
+    """
+    import torch
+
+    if not torch.cuda.is_available():
+        return False, "CUDA 不可用"
+
+    try:
+        cap = torch.cuda.get_device_capability(0)
+        name = torch.cuda.get_device_name(0)
+        sm = f"sm_{cap[0]}{cap[1]}"
+        archs = getattr(torch.cuda, "get_arch_list", lambda: [])() or []
+        if archs and sm not in archs:
+            return False, (
+                f"GPU {name}（{sm}）不受当前 PyTorch {torch.__version__} 支持"
+                f"（已编译: {', '.join(archs)}）"
+            )
+    except Exception as exc:  # noqa: BLE001
+        return False, f"CUDA 检测失败（{exc}）"
+
+    return True, None
 
 
 def active_classes(model_classes: List[str]) -> List[str]:
@@ -141,12 +202,11 @@ def preprocess_bgr_crops_to_chw(
     if n_workers <= 1 or n < 4:
         tensors = [letterbox_bgr_u8_to_chw(c, img_size) for c in crops_bgr]
     else:
-        from concurrent.futures import ThreadPoolExecutor
-
-        with ThreadPoolExecutor(max_workers=min(n_workers, n)) as ex:
-            tensors = list(
-                ex.map(lambda c: letterbox_bgr_u8_to_chw(c, img_size), crops_bgr)
-            )
+        # 复用进程内常驻线程池，不再每次调用都新建/销毁（见 _get_preprocess_pool）。
+        pool = _get_preprocess_pool()
+        tensors = list(
+            pool.map(lambda c: letterbox_bgr_u8_to_chw(c, img_size), crops_bgr)
+        )
     return tensors, time.perf_counter() - t0
 
 

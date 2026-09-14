@@ -43,14 +43,24 @@ _DEFAULT_BATCH_GPU = 64
 _DEFAULT_BATCH_CPU = 8
 
 
-def _cuda_hw_present() -> bool:
-    """机台是否有可用 NVIDIA GPU（无独显时勿尝试 CUDA EP，避免长时间失败）。"""
-    try:
-        import torch
+def _cuda_hw_present() -> Tuple[bool, Optional[str]]:
+    """机台是否有可用且架构兼容的 NVIDIA GPU。
 
-        return bool(torch.cuda.is_available())
-    except Exception:
-        return False
+    复用 inference_common.check_cuda_arch_compatible()——与 YOLO 检测
+    (sahi_detector) 和开发版分类 (inference_engine) 共用同一份检测逻辑。
+    之前这里只有裸的 torch.cuda.is_available()，没有 sm_120 这类新架构的
+    兼容性校验：ORT 的 CUDAExecutionProvider 会话可能"建得起来但推理时报
+    cudaErrorUnknown"，而不是像现在这样提前退回 CPU、给出明确原因。
+
+    Returns:
+        (usable, detail) —— detail 只在 usable=False 时有值。
+    """
+    try:
+        from inference_common import check_cuda_arch_compatible
+
+        return check_cuda_arch_compatible()
+    except Exception as exc:  # noqa: BLE001
+        return False, f"CUDA 检测失败（{exc}）"
 
 
 def _gpu_mem_limit_bytes() -> int:
@@ -108,10 +118,20 @@ def ort_available_providers() -> List[str]:
     return ort.get_available_providers()
 
 
-def pick_ort_providers(use_gpu: bool) -> Tuple[List[Any], str]:
-    """选择 ORT ExecutionProvider：有独显时 CUDA 快速模式，否则 CPU。始终带 CPU 回退。"""
+def pick_ort_providers(use_gpu: bool) -> Tuple[List[Any], str, Optional[str]]:
+    """选择 ORT ExecutionProvider：有独显时 CUDA 快速模式，否则 CPU。始终带 CPU 回退。
+
+    Returns:
+        (providers, picked, gpu_unavailable_detail) —— 第三项只在
+        use_gpu=True 但最终没有选中 CUDA 时才有值，说明具体原因
+        （无GPU / 架构不兼容 / 检测失败）。
+    """
     available = ort_available_providers()
-    if use_gpu and _cuda_hw_present() and "CUDAExecutionProvider" in available:
+    gpu_usable, gpu_detail = (False, None)
+    if use_gpu:
+        gpu_usable, gpu_detail = _cuda_hw_present()
+
+    if gpu_usable and "CUDAExecutionProvider" in available:
         cuda_opts = {
             "device_id": 0,
             "arena_extend_strategy": "kNextPowerOfTwo",
@@ -125,8 +145,9 @@ def pick_ort_providers(use_gpu: bool) -> Tuple[List[Any], str]:
                 "CPUExecutionProvider",
             ],
             "CUDAExecutionProvider",
+            None,
         )
-    return (["CPUExecutionProvider"], "CPUExecutionProvider")
+    return (["CPUExecutionProvider"], "CPUExecutionProvider", gpu_detail if use_gpu else None)
 
 
 def _make_session_options(on_gpu: bool) -> Any:
@@ -182,7 +203,7 @@ class InferenceEngine:
         self.classes = active_classes(self._model_classes)
         self._refresh_preprocess_cache()
 
-        providers, picked = pick_ort_providers(use_gpu)
+        providers, picked, gpu_detail = pick_ort_providers(use_gpu)
         on_gpu = picked == "CUDAExecutionProvider"
         sess_opts = _make_session_options(on_gpu)
         session_error = ""
@@ -232,10 +253,11 @@ class InferenceEngine:
                     f"（无可用 GPU 或 CUDA 初始化失败，已回退 CPU：{session_error}）"
                 )
             else:
+                detail = gpu_detail or "未检测到独立显卡"
                 hint = (
                     f"模型加载成功  [ONNX / {dev_label}]  {len(self.classes)} 类别 "
                     f"· {self.img_size}px · batch={self._batch_size}\n"
-                    f"（未检测到独立显卡，已使用 CPU。有 NVIDIA GPU 时将自动走 CUDA 快速模式）"
+                    f"（{detail}，已使用 CPU。有兼容的 NVIDIA GPU 时将自动走 CUDA 快速模式）"
                 )
         else:
             hint = (

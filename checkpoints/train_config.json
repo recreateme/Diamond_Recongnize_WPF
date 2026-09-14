@@ -1,6 +1,6 @@
 {
   "project_root": "D:\\Develop\\diamond_detect_wpf\\python_core",
-  "data_dir": "D:\\Develop\\diamond_detect_wpf\\data",
+  "data_dir": "D:\\迅雷下载\\corrections\\corrections",
   "img_size": 256,
   "num_classes": 3,
   "classes": [
@@ -8,16 +8,16 @@
     "点朝上",
     "面朝上"
   ],
-  "best_val_acc": 0.723214,
-  "best_macro_f1": 0.586463,
-  "model_arch": "mobilenet_v3_small",
-  "use_focal_loss": true,
+  "best_val_acc": 0.839286,
+  "best_macro_f1": 0.817711,
+  "model_arch": "efficientnet_v2_s",
+  "use_focal_loss": false,
   "use_class_weight": true,
   "focal_gamma": 2.0,
   "lr_phase1": 0.001,
-  "lr_phase2": 1e-05,
+  "lr_phase2": 5e-05,
   "epochs_phase1": 10,
-  "epochs_phase2": 50,
-  "patience": 0,
+  "epochs_phase2": 40,
+  "patience": 12,
   "resumed_from": null
 }

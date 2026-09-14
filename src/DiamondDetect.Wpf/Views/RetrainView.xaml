@@ -5,13 +5,14 @@
         <StackPanel>
             <TextBlock Style="{StaticResource PageTitleStyle}" Text="模型再训练"/>
             <TextBlock Style="{StaticResource PageHintStyle}"
-                       Text="调用 python_core/train.py（MobileNetV3-Small · Letterbox）。机台版默认只读；存在 corrections/ 时自动作为增量数据。早停默认关闭（跑满 epoch）。"/>
+                       Text="调用 python_core/train.py（EfficientNetV2-S · Letterbox）。机台版默认只读；存在 corrections/ 时自动作为增量数据。早停耐心轮数=12（macro-F1连续12轮无提升即停止，不影响最终精度）。"/>
 
             <Border Background="#FFF8E1" BorderBrush="#FFE082" BorderThickness="1"
                     CornerRadius="4" Padding="10,8" Margin="0,0,0,12">
                 <DockPanel>
                     <Button DockPanel.Dock="Right" Content="{Binding UnlockButtonText}"
-                            Padding="12,4" Command="{Binding ToggleLockCommand}"/>
+                            Padding="12,4" Command="{Binding ToggleLockCommand}"
+                            ToolTip="机台版默认锁定训练参数，防止误改；解锁后可编辑下方「训练参数」"/>
                     <TextBlock Text="{Binding LockStatus}" VerticalAlignment="Center" Foreground="#F57F17"/>
                 </DockPanel>
             </Border>
@@ -20,7 +21,8 @@
                 <StackPanel>
                     <TextBlock Text="{Binding StatsText}" TextWrapping="Wrap" Foreground="#455A64" FontSize="12"/>
                     <Button Content="刷新统计" HorizontalAlignment="Left" Margin="0,8,0,0" Padding="12,4"
-                            Command="{Binding RefreshStatsCommand}"/>
+                            Command="{Binding RefreshStatsCommand}"
+                            ToolTip="重新扫描 data/ 与 corrections/ 目录，更新上方各类别样本数统计"/>
                 </StackPanel>
             </GroupBox>
 
@@ -40,17 +42,23 @@
                     <TextBlock Grid.Column="1" Text="{Binding ModelArch}" Margin="0,4"
                                VerticalAlignment="Center" Foreground="#546E7A"/>
                     <TextBlock Grid.Row="1" Text="图像尺寸 (px)" VerticalAlignment="Center"/>
-                    <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding ImgSize}" Margin="0,4"/>
+                    <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding ImgSize}" Margin="0,4"
+                             ToolTip="训练/推理统一使用的正方形边长，需与当前模型的 img_size 一致，改动前请确认"/>
                     <TextBlock Grid.Row="2" Text="阶段一 Epochs" VerticalAlignment="Center"/>
-                    <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding EpochsPhase1}" Margin="0,4"/>
+                    <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding EpochsPhase1}" Margin="0,4"
+                             ToolTip="冻结骨干网络、只训练分类头的轮数，用于让新的分类头快速收敛"/>
                     <TextBlock Grid.Row="3" Text="阶段二 Epochs" VerticalAlignment="Center"/>
-                    <TextBox Grid.Row="3" Grid.Column="1" Text="{Binding EpochsPhase2}" Margin="0,4"/>
+                    <TextBox Grid.Row="3" Grid.Column="1" Text="{Binding EpochsPhase2}" Margin="0,4"
+                             ToolTip="解冻全部层端到端微调的轮数上限；实际可能因早停（耐心12轮）提前结束"/>
                     <TextBlock Grid.Row="4" Text="阶段一 LR" VerticalAlignment="Center"/>
-                    <TextBox Grid.Row="4" Grid.Column="1" Text="{Binding LrPhase1}" Margin="0,4"/>
+                    <TextBox Grid.Row="4" Grid.Column="1" Text="{Binding LrPhase1}" Margin="0,4"
+                             ToolTip="阶段一（只训练分类头）的学习率，通常可以设得比阶段二大"/>
                     <TextBlock Grid.Row="5" Text="阶段二 LR" VerticalAlignment="Center"/>
-                    <TextBox Grid.Row="5" Grid.Column="1" Text="{Binding LrPhase2}" Margin="0,4"/>
+                    <TextBox Grid.Row="5" Grid.Column="1" Text="{Binding LrPhase2}" Margin="0,4"
+                             ToolTip="阶段二（端到端微调）的学习率，数据量较小时建议保持偏低"/>
                     <TextBlock Grid.Row="6" Text="批大小" VerticalAlignment="Center"/>
-                    <TextBox Grid.Row="6" Grid.Column="1" Text="{Binding BatchSize}" Margin="0,4"/>
+                    <TextBox Grid.Row="6" Grid.Column="1" Text="{Binding BatchSize}" Margin="0,4"
+                             ToolTip="每步用于更新参数的样本数，显存/内存不足时可以调小"/>
                 </Grid>
             </GroupBox>
 
@@ -63,14 +71,17 @@
             <DockPanel>
                 <Button Style="{StaticResource PrimaryButtonStyle}" Content="开始训练" Height="36"
                         Command="{Binding StartTrainCommand}"
-                        IsEnabled="{Binding FormEnabled}"/>
+                        IsEnabled="{Binding FormEnabled}"
+                        ToolTip="按上方参数调用 train.py 开始训练，日志会实时输出到下方「训练日志」"/>
                 <Button Content="停止" Width="80" Height="36" Margin="8,0,0,0"
                         Command="{Binding StopTrainCommand}"
-                        IsEnabled="{Binding IsTraining}"/>
+                        IsEnabled="{Binding IsTraining}"
+                        ToolTip="终止正在进行的训练进程；已保存的 best_model.pt 不受影响"/>
                 <Button Content="应用新模型" Height="36" HorizontalAlignment="Right"
                         Background="#2E7D32" Foreground="White" Padding="16,0"
                         Command="{Binding ApplyModelCommand}"
-                        IsEnabled="{Binding CanApply}"/>
+                        IsEnabled="{Binding CanApply}"
+                        ToolTip="训练完成后，把新的 best_model.pt / class_map.json 应用为当前使用的分类模型"/>
             </DockPanel>
         </StackPanel>
     </ScrollViewer>

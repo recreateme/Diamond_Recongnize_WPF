@@ -11,21 +11,28 @@
         <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,8">
             <TextBlock Text="类别筛选:" VerticalAlignment="Center" Margin="0,0,6,0" Foreground="#546E7A"/>
             <ComboBox Width="120" ItemsSource="{Binding ClassFilters}"
-                      SelectedItem="{Binding SelectedClassFilter}" Margin="0,0,12,0"/>
+                      SelectedItem="{Binding SelectedClassFilter}" Margin="0,0,12,0"
+                      ToolTip="按分类结果筛选下方列表，「全部」表示不过滤"/>
             <TextBlock Text="置信度 ≤" VerticalAlignment="Center" Margin="0,0,6,0" Foreground="#546E7A"/>
             <Slider Width="140" Minimum="0" Maximum="1" TickFrequency="0.05" IsSnapToTickEnabled="True"
-                    Value="{Binding MaxConfidenceFilter}" VerticalAlignment="Center"/>
+                    Value="{Binding MaxConfidenceFilter}" VerticalAlignment="Center"
+                    ToolTip="只显示分类置信度不超过该阈值的样本，用来快速定位模型判断不确定的目标"/>
             <TextBlock Text="{Binding MaxConfidenceFilter, StringFormat={}{0:0.00}}"
                        VerticalAlignment="Center" Margin="6,0,12,0" Width="36"/>
             <Button Content="{Binding ToggleSelectText}" Margin="0,0,8,0" Padding="10,4"
-                    Command="{Binding ToggleSelectAllCommand}"/>
+                    Command="{Binding ToggleSelectAllCommand}"
+                    ToolTip="全选/取消全选当前筛选结果，配合下面几个批量操作按钮使用"/>
             <Button Content="送修正页" Margin="0,0,8,0" Padding="10,4" Background="#F57C00" Foreground="White"
-                    Command="{Binding SendSelectedToCorrectionCommand}"/>
+                    Command="{Binding SendSelectedToCorrectionCommand}"
+                    ToolTip="把当前勾选的样本发送到「结果修正」页，人工复核并改正分类标签"/>
             <Button Content="当前筛选全部送修正" Margin="0,0,8,0" Padding="10,4" Background="#F57C00" Foreground="White"
-                    Command="{Binding SendVisibleToCorrectionCommand}"/>
+                    Command="{Binding SendVisibleToCorrectionCommand}"
+                    ToolTip="不用逐个勾选，直接把当前筛选条件下的全部样本一次性发送到「结果修正」页"/>
             <Button Content="导出分类结果" Margin="0,0,8,0" Padding="10,4"
-                    Command="{Binding ExportClassifiedCommand}"/>
-            <Button Content="导出 CSV" Padding="10,4" Command="{Binding ExportCsvCommand}"/>
+                    Command="{Binding ExportClassifiedCommand}"
+                    ToolTip="按分类结果把裁剪图分子目录导出到磁盘，方便归档或进一步核对"/>
+            <Button Content="导出 CSV" Padding="10,4" Command="{Binding ExportCsvCommand}"
+                    ToolTip="导出当前筛选结果的明细表格（含坐标、置信度、分类等字段）"/>
         </WrapPanel>
 
         <TextBlock DockPanel.Dock="Top" Margin="0,0,0,8" FontSize="11" Foreground="#78909C"
@@ -63,7 +70,8 @@
                         <DataGridTemplateColumn.Header>
                             <Button Content="{Binding DataContext.ConfidenceHeader, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                     Command="{Binding DataContext.ToggleConfidenceSortCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                    Background="Transparent" BorderThickness="0" Foreground="#1565C0" Cursor="Hand"/>
+                                    Background="Transparent" BorderThickness="0" Foreground="#1565C0" Cursor="Hand"
+                                    ToolTip="点击切换按置信度升序/降序排列"/>
                         </DataGridTemplateColumn.Header>
                         <DataGridTemplateColumn.CellTemplate>
                             <DataTemplate>
@@ -76,7 +84,8 @@
                             <DataTemplate>
                                 <Button Content="送修正" Padding="8,4" Background="#F57C00" Foreground="White"
                                         Command="{Binding DataContext.SendOneToCorrectionCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                        CommandParameter="{Binding}"/>
+                                        CommandParameter="{Binding}"
+                                        ToolTip="把这一条样本单独发送到「结果修正」页复核"/>
                             </DataTemplate>
                         </DataGridTemplateColumn.CellTemplate>
                     </DataGridTemplateColumn>

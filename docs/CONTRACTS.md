@@ -6,7 +6,7 @@ WPF 与 `python_core` 必须遵守下列契约，变更时同步更新本文件�
 
 | 项 | 约定 |
 |----|------|
-| 模型输出 | 现行 `class_map.json` / ONNX 为 **3 类**：`棱边朝上`、`点朝上`、`面朝上`（MobileNetV3-Small，Letterbox `img_size`） |
+| 模型输出 | 现行 `class_map.json` / ONNX 为 **3 类**：`棱边朝上`、`点朝上`、`面朝上`（EfficientNetV2-S，Letterbox `img_size`） |
 | 应用有效类 | 同上三类；加载历史 5 类权重时仍排除「局部破损」「断钻」 |
 | 决策 | 有效类内 softmax argmax；**不使用** `class_thresholds.json` |
 | 引擎对外 `Classes` | 仅有效类（误分类修正按钮、筛选、状态栏类别数） |
