@@ -33,10 +33,10 @@ public sealed class AppConfig
     public string SahiDevice { get; set; } = "auto";
 
     [JsonPropertyName("sahi_slice_size")]
-    public int SahiSliceSize { get; set; } = 1280;
+    public int SahiSliceSize { get; set; } = 1248;
 
     [JsonPropertyName("sahi_overlap")]
-    public double SahiOverlap { get; set; } = 0.20;
+    public double SahiOverlap { get; set; } = 0.2244;
 
     [JsonPropertyName("sahi_det_conf")]
     public double SahiDetConf { get; set; } = 0.35;

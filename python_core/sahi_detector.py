@@ -162,34 +162,122 @@ class Detection:
 # 纯函数
 # ════════════════════════════════════════════════════════════════════════
 
-def slice_positions(H: int, W: int, size: int, step: int) -> List[Tuple[int, int, int, int]]:
+# 相邻切片（上下/左右）允许的最大重叠像素。
+# 旧实现「名义 overlap_ratio × size」在末片贴边时，末两片实际重叠常远超该值
+# （5120/1280/step=1024 时末重叠可达 512px）。统一以此硬上限约束。
+DEFAULT_MAX_SLICE_OVERLAP_PX = 280
+# 默认切片：1248（32 倍数，利于 YOLO imgsz）+ 重叠 280 → step=968；
+# 对 5120 图恰好 5×5=25 片、相邻重叠恒为 280，无贴边超额。
+DEFAULT_SLICE_SIZE = 1248
+DEFAULT_OVERLAP_RATIO = DEFAULT_MAX_SLICE_OVERLAP_PX / DEFAULT_SLICE_SIZE  # ≈0.2244
+
+
+def clamp_slice_overlap_px(
+    slice_size: int,
+    overlap_ratio: float,
+    max_overlap_px: int = DEFAULT_MAX_SLICE_OVERLAP_PX,
+) -> int:
+    """将 overlap_ratio 换算为像素，并截断到 [0, max_overlap_px]。"""
+    size = max(1, int(slice_size))
+    requested = int(round(size * float(overlap_ratio)))
+    return max(0, min(requested, int(max_overlap_px), size - 1))
+
+
+def slice_step_from_overlap(
+    slice_size: int,
+    overlap_ratio: float,
+    max_overlap_px: int = DEFAULT_MAX_SLICE_OVERLAP_PX,
+) -> Tuple[int, int]:
+    """返回 (step, overlap_px)，保证 overlap_px ≤ max_overlap_px。"""
+    overlap_px = clamp_slice_overlap_px(slice_size, overlap_ratio, max_overlap_px)
+    step = max(1, int(slice_size) - overlap_px)
+    return step, overlap_px
+
+
+def _axis_starts(
+    dim: int,
+    size: int,
+    step_prefer: int,
+    max_overlap_px: int,
+) -> List[int]:
+    """
+    一维均匀铺格起点，保证全覆盖；在可铺满时相邻重叠 ≤ max_overlap_px。
+
+    若图像尺寸与切片组合无法在「重叠≤上限」下铺满（例如 2560 图 + 1248 切片），
+    则放宽重叠上限以保证无漏缝（覆盖优先）。
+    """
+    if dim <= size:
+        return [0]
+    size = max(1, int(size))
+    step_floor = max(1, size - int(max_overlap_px))
+    step_prefer = max(1, min(max(1, int(step_prefer)), size))
+
+    # 无漏缝所需最少片数：step <= size
+    n_min = max(2, (dim - size + size - 1) // size + 1)
+    # 重叠上限下最多片数
+    n_max_capped = (dim - size) // step_floor + 1
+    n_max = max(n_min, n_max_capped, (dim - size) // max(1, size // 4) + 1)
+
+    def _pick(n_lo: int, n_hi: int, min_step: int) -> Optional[List[int]]:
+        best: Optional[Tuple[int, int, int]] = None  # (dist, -n, step)
+        for n in range(n_hi, n_lo - 1, -1):
+            gaps = n - 1
+            if gaps <= 0 or (dim - size) % gaps != 0:
+                continue
+            step = (dim - size) // gaps
+            if min_step <= step <= size:
+                cand = (abs(step - step_prefer), -n, step)
+                if best is None or cand < best:
+                    best = cand
+        if best is None:
+            return None
+        step, n = best[2], -best[1]
+        return [i * step for i in range(n)]
+
+    # 1) 优先：重叠 ≤ max_overlap_px
+    starts = _pick(n_min, max(n_min, n_max_capped), step_floor)
+    if starts is not None:
+        return starts
+    # 2) 放宽：仅保证无漏缝
+    starts = _pick(n_min, n_max, 1)
+    if starts is not None:
+        return starts
+    return [0, dim - size]
+
+
+def slice_positions(
+    H: int,
+    W: int,
+    size: int,
+    step: int,
+    max_overlap_px: int = DEFAULT_MAX_SLICE_OVERLAP_PX,
+) -> List[Tuple[int, int, int, int]]:
     """
     生成滑动窗口切片坐标 (x1, y1, x2, y2)。
 
-    末尾切片贴边处理（min(pos, dim-size)），确保无黑边、全覆盖。
+    使用均匀步长铺格，使左右/上下相邻重叠不超过 max_overlap_px。
     当图像小于切片尺寸时，返回单个覆盖全图的切片。
 
-    示例: H=W=5120, size=1280, step=1024 → 每方向 5 片，共 25 片
+    示例: H=W=5120, size=1248, step=968, max_overlap=280
+          → 每方向 5 片，相邻重叠恒 280px，共 25 片
     """
+    size = max(1, int(size))
+    step_prefer = max(1, int(step))
+
     if H <= size and W <= size:
         return [(0, 0, W, H)]
 
+    ys = _axis_starts(H, size, step_prefer, max_overlap_px) if H > size else [0]
+    xs = _axis_starts(W, size, step_prefer, max_overlap_px) if W > size else [0]
+
     coords: List[Tuple[int, int, int, int]] = []
-    y = 0
-    while True:
-        y1 = min(y, H - size) if H > size else 0
-        x = 0
-        while True:
-            x1 = min(x, W - size) if W > size else 0
-            x2 = min(x1 + size, W)
-            y2 = min(y1 + size, H)
+    for y0 in ys:
+        y1 = min(y0, H - size) if H > size else 0
+        y2 = y1 + size if H > size else min(y1 + size, H)
+        for x0 in xs:
+            x1 = min(x0, W - size) if W > size else 0
+            x2 = x1 + size if W > size else min(x1 + size, W)
             coords.append((x1, y1, x2, y2))
-            if x1 + size >= W:
-                break
-            x += step
-        if y1 + size >= H:
-            break
-        y += step
     return coords
 
 
@@ -548,8 +636,8 @@ class SahiDetector:
     Args:
         model_path:     YOLO 权重路径（.pt）
         device:          'auto' / 'cuda:0' / 'cpu'
-        slice_size:      切片边长（像素），5120 图推荐 1280
-        overlap_ratio:   切片重叠比例 (0–1)，0.20 → 步长 = size×0.80
+        slice_size:      切片边长（像素），5120 图默认 1248（32 倍数）
+        overlap_ratio:   切片重叠比例 (0–1)；有效重叠像素会被截断到 ≤280
         conf:            检测置信度阈值
         batch_size:      每批推理的切片数（按显存调整）
         nms_iou:         IoU-NMS 阈值（重叠去重）
@@ -568,8 +656,8 @@ class SahiDetector:
         self,
         model_path: str,
         device: str = "auto",
-        slice_size: int = 1280,
-        overlap_ratio: float = 0.20,
+        slice_size: int = DEFAULT_SLICE_SIZE,
+        overlap_ratio: float = DEFAULT_OVERLAP_RATIO,
         conf: float = 0.35,
         batch_size: int = 8,
         nms_iou: float = 0.50,
@@ -580,11 +668,13 @@ class SahiDetector:
         edge_filter: bool = True,
         edge_margin_px: float = 20,
         drop_touching: bool = True,
+        max_overlap_px: int = DEFAULT_MAX_SLICE_OVERLAP_PX,
     ):
         self.model_path = model_path
         self.device = device
-        self.slice_size = slice_size
-        self.overlap_ratio = overlap_ratio
+        self.slice_size = int(slice_size)
+        self.overlap_ratio = float(overlap_ratio)
+        self.max_overlap_px = int(max_overlap_px)
         self.conf = conf
         self.batch_size = batch_size
         self.nms_iou = nms_iou
@@ -607,9 +697,19 @@ class SahiDetector:
         self._loaded = False
 
     @property
+    def overlap_px(self) -> int:
+        """有效相邻重叠像素（已按 max_overlap_px 截断）。"""
+        return clamp_slice_overlap_px(
+            self.slice_size, self.overlap_ratio, self.max_overlap_px,
+        )
+
+    @property
     def step(self) -> int:
-        """滑动步长 = slice_size × (1 - overlap_ratio)"""
-        return max(1, int(self.slice_size * (1.0 - self.overlap_ratio)))
+        """滑动步长 = slice_size - overlap_px（≥ slice_size - max_overlap_px）。"""
+        step, _ = slice_step_from_overlap(
+            self.slice_size, self.overlap_ratio, self.max_overlap_px,
+        )
+        return step
 
     def load(self) -> str:
         """加载 YOLO 模型，返回状态描述字符串。"""
@@ -660,7 +760,10 @@ class SahiDetector:
             raise RuntimeError("YOLO 模型未加载，请先调用 load()")
 
         H, W = img.shape[:2]
-        coords = slice_positions(H, W, self.slice_size, self.step)
+        coords = slice_positions(
+            H, W, self.slice_size, self.step,
+            max_overlap_px=self.max_overlap_px,
+        )
         tiles  = [img[y1:y2, x1:x2] for x1, y1, x2, y2 in coords]
 
         # ── 分批推理 ──────────────────────────────────────────────
@@ -1053,8 +1156,12 @@ class SahiPipeline:
         # ── 2. SAHI 检测 ──────────────────────────────────────────
         _stage(f"检测 {path.name}", 1)
         t0 = time.time()
-        _log(f"SAHI 检测: 切片 {self.detector.slice_size}px, "
-             f"重叠 {self.detector.overlap_ratio:.0%}, 置信度 {self.detector.conf}")
+        _log(
+            f"SAHI 检测: 切片 {self.detector.slice_size}px, "
+            f"重叠 {self.detector.overlap_px}px"
+            f"（≤{self.detector.max_overlap_px}px, ratio={self.detector.overlap_ratio:.3f}）, "
+            f"步长 {self.detector.step}px, 置信度 {self.detector.conf}"
+        )
         dets = self.detector.detect(img, should_stop=should_stop)
         det_time = time.time() - t0
         skip_stats = dict(self.detector.last_skip_stats)

@@ -72,7 +72,7 @@
                                 <TextBox x:Name="SahiDeviceBox" Grid.Row="1" Grid.Column="1" Margin="0,3"/>
                                 <TextBlock Grid.Row="2" Text="切片尺寸" VerticalAlignment="Center"/>
                                 <TextBox x:Name="SliceSizeBox" Grid.Row="2" Grid.Column="1" Margin="0,3"/>
-                                <TextBlock Grid.Row="3" Text="重叠比例" VerticalAlignment="Center"/>
+                                <TextBlock Grid.Row="3" Text="重叠比例(有效≤280px)" VerticalAlignment="Center"/>
                                 <TextBox x:Name="OverlapBox" Grid.Row="3" Grid.Column="1" Margin="0,3"/>
                                 <TextBlock Grid.Row="4" Text="检测置信度" VerticalAlignment="Center"/>
                                 <TextBox x:Name="DetConfBox" Grid.Row="4" Grid.Column="1" Margin="0,3"/>

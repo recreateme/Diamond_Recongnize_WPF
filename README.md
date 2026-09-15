@@ -18,6 +18,7 @@
 | [docs/钻石均匀度评分模块说明.md](docs/钻石均匀度评分模块说明.md) | 均匀度算法细则 |
 | [docs/钻石检测低分辨率漏检优化方案.md](docs/钻石检测低分辨率漏检优化方案.md) | 漏检优化笔记 |
 | [python_core/README.md](python_core/README.md) | 算法模块索引 |
+| [python_core/docs/分类推理速度优化建议.md](python_core/docs/分类推理速度优化建议.md) | 批测瓶颈与下一步速度优化 |
 
 ## 快速开始（开发）
 

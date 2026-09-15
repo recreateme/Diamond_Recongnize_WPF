@@ -18,14 +18,19 @@
 | `model_builder.py` | EfficientNetV2-S 构建（训练 / 开发版推理共用） |
 | `inference_engine.py` | 开发版 PyTorch/ONNX 分类 |
 | `inference_engine_onnx.py` | 机台 ONNX Runtime 分类 |
-| `sahi_detector.py` | SAHI + YOLO 大图流水线；可选 `crop/` 落盘；分类耗时拆预处理/推理 |
+| `sahi_detector.py` | SAHI + YOLO 大图流水线；重叠 ≤280px；可选 `crop/` 落盘；分类耗时拆预处理/推理 |
 | `diamond_uniformity.py` | 单 tile 均匀度评分 + `uniformity_vis` 可视化 |
 | `train.py` | EfficientNetV2-S 两阶段训练 / 微调 / ONNX 导出；阶段二冻结 BN；写出 `training.log`、`training_log.csv`、`training_history.json`、`training_curves.png`、`classification_report.txt` |
 | `analyze_image_sizes.py` | 图像尺寸分析 |
 | `app_paths.py` | 路径与 ORT DLL |
 | `app_deploy.py` | 原机台入口语义（过渡保留） |
 | `scripts/` | 打包与验收 |
+| `docs/` | 算法侧说明（含速度优化建议） |
 | `pyinstaller_hooks/` | 冻结进程 ORT hook |
+
+## 速度与后续优化
+
+批测结论与下一步尝试清单见：**[docs/分类推理速度优化建议.md](docs/分类推理速度优化建议.md)**（分类约 85% 耗时；batch 保持 64）。
 
 ## 依赖
 
