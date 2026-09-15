@@ -167,6 +167,10 @@ $deployCfg = [ordered]@{
     sahi_edge_filter        = $true
     sahi_edge_margin_px     = 20
     uniformity_conf_threshold = 0.25
+    ui_save_visualization   = $false
+    ui_save_crops           = $false
+    ui_save_boxes           = $false
+    ui_run_uniformity       = $false
 }
 $deployCfg | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $DistRoot "app_config.json") -Encoding UTF8
 

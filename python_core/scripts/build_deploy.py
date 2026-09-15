@@ -342,6 +342,10 @@ _DEPLOY_APP_CONFIG = {
     "sahi_max_aspect_ratio": 1.5,
     "sahi_edge_filter":    True,
     "sahi_edge_margin_px": 20,
+    "ui_save_visualization": False,
+    "ui_save_crops": False,
+    "ui_save_boxes": False,
+    "ui_run_uniformity": False,
 }
 
 

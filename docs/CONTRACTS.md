@@ -18,12 +18,13 @@ WPF 与 `python_core` 必须遵守下列契约，变更时同步更新本文件�
 
 字段名与原 `defect_detect` 一致：
 
-`pt_path`, `onnx_path`, `data_dir`, `corrections_dir`, `use_gpu`, `enable_local_diagnostics`, `yolo_path`, `sahi_device`, `sahi_slice_size`, `sahi_overlap`, `sahi_det_conf`, `sahi_batch_size`, `sahi_crop_padding`, `sahi_output_dir`, `sahi_ios_thresh`, `sahi_min_area_ratio`, `sahi_max_aspect_ratio`, `sahi_edge_filter`, `sahi_edge_margin_px`, `uniformity_conf_threshold`
+`pt_path`, `onnx_path`, `data_dir`, `corrections_dir`, `use_gpu`, `enable_local_diagnostics`, `yolo_path`, `sahi_device`, `sahi_slice_size`, `sahi_overlap`, `sahi_det_conf`, `sahi_batch_size`, `sahi_crop_padding`, `sahi_output_dir`, `sahi_ios_thresh`, `sahi_min_area_ratio`, `sahi_max_aspect_ratio`, `sahi_edge_filter`, `sahi_edge_margin_px`, `uniformity_conf_threshold`, `ui_save_visualization`, `ui_save_crops`, `ui_save_boxes`, `ui_run_uniformity`
 
 - 机台包内路径使用**相对路径**（相对应用根目录）。
 - 废弃键 `conf_threshold` 忽略。
 - `enable_local_diagnostics`：默认 `false`；为 `true` 时仅写入本机 `logs/diag.jsonl`，不上传。
 - `uniformity_conf_threshold`：均匀度模块 YOLO `det_conf` 过滤阈值，默认 `0.25`。
+- `ui_save_*` / `ui_run_uniformity`：钻石检测页「输出选项」勾选状态；默认全 `false`；勾选变更即写回；处理模式（仅检测定位等）不持久化。
 
 ## 检测结果（DetectionResult）
 
@@ -65,9 +66,9 @@ WPF 与 `python_core` 必须遵守下列契约，变更时同步更新本文件�
 
 | 文件 | 说明 |
 |------|------|
-| `detect_boxes.json` / `detect_boxes.csv` | 检测框坐标（与检测用图同分辨率）；含 `det_conf`（YOLO 检测分）；完整模式另含 `defect_class`、`defect_conf`；勾选保存 crop 时含相对路径 `crop_path` |
+| `detect_boxes.json` / `detect_boxes.csv` | **勾选「输出位置文件」时**写出：检测框坐标（与检测用图同分辨率）；含 `det_conf`；完整模式另含 `defect_class`、`defect_conf`；同时勾选 crop 时含 `crop_path` |
 | `crop/` | 可选：裁剪切片；完整模式为 `crop/<类别>/NNNN.jpg`；仅检测为 `crop/NNNN.jpg` |
-| `uniformity_scores.json` | 完整模式且运行均匀度后：单图分数 + 元数据（`status`/`conf_filter` 等） |
+| `uniformity_scores.json` | 完整模式且勾选「计算均匀度」（需已勾位置文件）后：单图分数 + 元数据（`status`/`conf_filter` 等） |
 | `visualization_classified.jpg` | 完整模式且勾选「保存可视化」且有目标时 |
 | `visualization_detection.jpg` | 仅检测模式且勾选「保存可视化」且有目标时 |
 | `{stem}_detect_input.jpg` | 仅检测且发生下采样时 |

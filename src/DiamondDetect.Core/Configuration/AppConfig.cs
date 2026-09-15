@@ -69,6 +69,22 @@ public sealed class AppConfig
     [JsonPropertyName("uniformity_conf_threshold")]
     public double UniformityConfThreshold { get; set; } = 0.25;
 
+    /// <summary>检测页输出选项：保存可视化（默认关，跨会话记住）。</summary>
+    [JsonPropertyName("ui_save_visualization")]
+    public bool UiSaveVisualization { get; set; }
+
+    /// <summary>检测页输出选项：保存 crop/（默认关）。</summary>
+    [JsonPropertyName("ui_save_crops")]
+    public bool UiSaveCrops { get; set; }
+
+    /// <summary>检测页输出选项：写出 detect_boxes.json/csv（默认关）。</summary>
+    [JsonPropertyName("ui_save_boxes")]
+    public bool UiSaveBoxes { get; set; }
+
+    /// <summary>检测页输出选项：跑完后计算均匀度（默认关；需完整模式且已勾位置文件）。</summary>
+    [JsonPropertyName("ui_run_uniformity")]
+    public bool UiRunUniformity { get; set; }
+
     public static AppConfig CreateDefault(bool deployMode)
     {
         var cfg = new AppConfig();

@@ -52,6 +52,9 @@ public sealed class SahiRunOptions
 
     /// <summary>勾选后在每图输出目录写 crop/；完整模式按类别分子目录。</summary>
     public bool SaveCrops { get; init; }
+
+    /// <summary>勾选后写出 detect_boxes.json / detect_boxes.csv。</summary>
+    public bool SaveBoxes { get; init; }
 }
 
 public sealed class SahiImageStats

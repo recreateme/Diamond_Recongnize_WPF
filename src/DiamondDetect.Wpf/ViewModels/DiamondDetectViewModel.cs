@@ -24,6 +24,7 @@ public partial class SahiResultRow : ObservableObject
 public partial class DiamondDetectViewModel : ObservableObject
 {
     private readonly AppSession _session;
+    private readonly IConfigService _configService;
     private readonly IInferenceEngine _engine;
     private readonly ISahiPipeline _sahi;
     private readonly MainViewModel _main;
@@ -31,20 +32,24 @@ public partial class DiamondDetectViewModel : ObservableObject
     private CancellationTokenSource? _cts;
     private List<string> _imgPaths = new();
     private string _inputFolder = "";
+    private bool _loadingUiPrefs;
 
     public DiamondDetectViewModel(
         AppSession session,
+        IConfigService configService,
         IInferenceEngine engine,
         ISahiPipeline sahi,
         MainViewModel main,
         UniformityViewModel uniformity)
     {
         _session = session;
+        _configService = configService;
         _engine = engine;
         _sahi = sahi;
         _main = main;
         _uniformity = uniformity;
         OutputDir = ResolveDefaultOutput();
+        LoadOutputPrefsFromConfig();
     }
 
     public ObservableCollection<SahiResultRow> Rows { get; } = new();
@@ -52,10 +57,11 @@ public partial class DiamondDetectViewModel : ObservableObject
         new[] { "area", "linear", "cubic", "nearest" };
 
     [ObservableProperty] private string pageHintText =
-        "大图 SAHI 切片检测 + 缺陷分类。可选「仅检测定位」；「输出选项」可保存可视化图与 crop/ 裁剪切片。";
+        "大图 SAHI 切片检测 + 缺陷分类。可选「仅检测定位」；「输出选项」默认全关，勾选后才会写可视化 / crop / 位置文件等。";
     [ObservableProperty] private bool detectOnly;
     [ObservableProperty] private bool saveVisualization;
     [ObservableProperty] private bool saveCrops;
+    [ObservableProperty] private bool saveBoxes;
     [ObservableProperty] private bool runUniformityAfter;
     [ObservableProperty] private bool downsampleEnabled;
     [ObservableProperty] private int downsampleMaxSide = 2560;
@@ -72,11 +78,78 @@ public partial class DiamondDetectViewModel : ObservableObject
     [ObservableProperty] private bool stageVisible;
     [ObservableProperty] private string totalText = "合计：0 张图 · 0 颗钻石";
 
+    /// <summary>完整模式且已勾选输出位置文件时才可勾选「计算均匀度」。</summary>
+    public bool CanRunUniformity => !DetectOnly && SaveBoxes;
+
     public bool CanStop => IsRunning && !IsStopping;
 
     partial void OnIsRunningChanged(bool value) => OnPropertyChanged(nameof(CanStop));
     partial void OnIsStoppingChanged(bool value) => OnPropertyChanged(nameof(CanStop));
 
+    partial void OnDetectOnlyChanged(bool value)
+    {
+        OnPropertyChanged(nameof(CanRunUniformity));
+        if (value && RunUniformityAfter)
+            RunUniformityAfter = false;
+    }
+
+    partial void OnSaveBoxesChanged(bool value)
+    {
+        OnPropertyChanged(nameof(CanRunUniformity));
+        if (!value && RunUniformityAfter)
+            RunUniformityAfter = false;
+        PersistOutputPrefs();
+    }
+
+    partial void OnSaveVisualizationChanged(bool value) => PersistOutputPrefs();
+    partial void OnSaveCropsChanged(bool value) => PersistOutputPrefs();
+    partial void OnRunUniformityAfterChanged(bool value) => PersistOutputPrefs();
+
+    private void LoadOutputPrefsFromConfig()
+    {
+        _loadingUiPrefs = true;
+        try
+        {
+            var c = _session.Config;
+            SaveVisualization = c.UiSaveVisualization;
+            SaveCrops = c.UiSaveCrops;
+            SaveBoxes = c.UiSaveBoxes;
+            RunUniformityAfter = c.UiRunUniformity && !DetectOnly && c.UiSaveBoxes;
+        }
+        finally
+        {
+            _loadingUiPrefs = false;
+        }
+        OnPropertyChanged(nameof(CanRunUniformity));
+    }
+
+    private void PersistOutputPrefs()
+    {
+        if (_loadingUiPrefs) return;
+        var c = _configService.Current;
+        var wantVis = SaveVisualization;
+        var wantCrops = SaveCrops;
+        var wantBoxes = SaveBoxes;
+        var wantUni = RunUniformityAfter && !DetectOnly && SaveBoxes;
+        if (c.UiSaveVisualization == wantVis
+            && c.UiSaveCrops == wantCrops
+            && c.UiSaveBoxes == wantBoxes
+            && c.UiRunUniformity == wantUni)
+            return;
+        c.UiSaveVisualization = wantVis;
+        c.UiSaveCrops = wantCrops;
+        c.UiSaveBoxes = wantBoxes;
+        c.UiRunUniformity = wantUni;
+        try
+        {
+            _configService.Save(c);
+            _session.Config = c;
+        }
+        catch
+        {
+            // 只读目录时跳过
+        }
+    }
     [RelayCommand]
     private void BrowseFiles()
     {
@@ -181,6 +254,7 @@ public partial class DiamondDetectViewModel : ObservableObject
                 : SelectedInterpolation.Trim(),
             SaveVisualization = SaveVisualization,
             SaveCrops = SaveCrops,
+            SaveBoxes = SaveBoxes,
         };
 
         var progress = new Progress<SahiProgress>(p =>
@@ -239,6 +313,7 @@ public partial class DiamondDetectViewModel : ObservableObject
 
         if (!cancelled
             && !DetectOnly
+            && SaveBoxes
             && RunUniformityAfter
             && stats.Count > 0
             && !string.IsNullOrWhiteSpace(OutputDir)

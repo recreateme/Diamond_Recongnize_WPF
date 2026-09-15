@@ -91,6 +91,7 @@ public sealed class PythonSahiPipeline : ISahiPipeline
                     downsample_interpolation: options.DownsampleInterpolation ?? "area",
                     save_visualization: options.SaveVisualization,
                     save_crops: options.SaveCrops,
+                    save_boxes: options.SaveBoxes,
                     crop_padding: options.CropPadding);
             }
             else
@@ -101,7 +102,8 @@ public sealed class PythonSahiPipeline : ISahiPipeline
                     options.OutputDir,
                     options.CropPadding,
                     save_visualization: options.SaveVisualization,
-                    save_crops: options.SaveCrops);
+                    save_crops: options.SaveCrops,
+                    save_boxes: options.SaveBoxes);
             }
 
             var cancelBridge = new CancellationBridge(cancellationToken);

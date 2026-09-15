@@ -8,7 +8,7 @@ Slicing Aided Hyper Inference (SAHI) 大图检测 + 缺陷分类流水线
   1. 切片目标检测（滑动窗口 → YOLO 批量推理）
   2. 后处理链：iou_nms → IoS 包含抑制 → 面积/长宽比过滤 → 边缘剔除
   3. 裁剪每个检测目标 → 缺陷分类引擎批量分类
-  4. 写出 detect_boxes.json/csv；可选可视化 JPEG
+  4. 可选写出 detect_boxes.json/csv、可视化 JPEG、crop/
 
 设计参考: data_process/pipeline/phase3_inference.py（产品级 24×24 网格推理）
 本模块针对**单张大图**简化：无需网格坐标、跨图 NMS。
@@ -1087,7 +1087,7 @@ class SahiPipeline:
     流程 (process_image):
       1. 读取大图 → SahiDetector.detect() → 检测框列表
       2. 内存裁剪 → InferenceEngine 批量分类
-      3. 写出 detect_boxes.json/csv（含分类列）
+      3. 可选写出 detect_boxes.json/csv（含分类列）
       4. 可选写出 crop/（按类别子目录）与 visualization_classified.jpg
       5. 返回统计字典（summary.csv 由 WPF Bridge 写入）
     """
@@ -1100,6 +1100,7 @@ class SahiPipeline:
         crop_padding: int = 15,
         save_visualization: bool = False,
         save_crops: bool = False,
+        save_boxes: bool = False,
     ):
         self.detector = detector
         self.classifier = classifier
@@ -1107,6 +1108,7 @@ class SahiPipeline:
         self.crop_padding = crop_padding
         self.save_visualization = bool(save_visualization)
         self.save_crops = bool(save_crops)
+        self.save_boxes = bool(save_boxes)
 
     def process_image(
         self,
@@ -1180,15 +1182,20 @@ class SahiPipeline:
 
         if not dets:
             _log("未检测到任何目标")
-            json_path, csv_path = write_detect_boxes_files(
-                img_out_dir, f"{stem}.jpg", detect_size, [],
-                with_classification=True,
-            )
-            _log(f"坐标已保存: {json_path.name}, {csv_path.name}")
+            boxes_json, boxes_csv = "", ""
+            if self.save_boxes:
+                json_path, csv_path = write_detect_boxes_files(
+                    img_out_dir, f"{stem}.jpg", detect_size, [],
+                    with_classification=True,
+                )
+                boxes_json, boxes_csv = str(json_path), str(csv_path)
+                _log(f"坐标已保存: {json_path.name}, {csv_path.name}")
+            else:
+                _log("跳过位置文件（未勾选）")
             _stage(f"完成 {path.name}", 4)
             return self._stats(
                 stem, [], det_time, 0.0, str(img_out_dir), skip_stats,
-                boxes_json=str(json_path), boxes_csv=str(csv_path),
+                boxes_json=boxes_json, boxes_csv=boxes_csv,
             )
 
         _check_stop(should_stop)
@@ -1280,7 +1287,7 @@ class SahiPipeline:
         for d, r in zip(dets, cls_results):
             d.apply_classifier_result(r, known_classes=known_classes)
 
-        # ── 5. 写出坐标 + 可选 crop / 可视化 ─────────────────────────
+        # ── 5. 可选写出坐标 + crop / 可视化 ─────────────────────────
         _stage(f"保存 {path.name}", 4)
         if self.save_crops and crop_bgr:
             crop_dir = save_crop_images(
@@ -1288,12 +1295,17 @@ class SahiPipeline:
             )
             _log(f"裁剪图已保存: {crop_dir.name}/（按类别子目录）")
 
-        boxes = detections_to_opencv_boxes(dets, with_classification=True)
-        json_path, csv_path = write_detect_boxes_files(
-            img_out_dir, f"{stem}.jpg", detect_size, boxes,
-            with_classification=True,
-        )
-        _log(f"坐标已保存: {json_path.name}, {csv_path.name}")
+        boxes_json, boxes_csv = "", ""
+        if self.save_boxes:
+            boxes = detections_to_opencv_boxes(dets, with_classification=True)
+            json_path, csv_path = write_detect_boxes_files(
+                img_out_dir, f"{stem}.jpg", detect_size, boxes,
+                with_classification=True,
+            )
+            boxes_json, boxes_csv = str(json_path), str(csv_path)
+            _log(f"坐标已保存: {json_path.name}, {csv_path.name}")
+        else:
+            _log("跳过位置文件（未勾选）")
 
         if self.save_visualization:
             vis_path = save_classified_visualization(img_out_dir, img, dets)
@@ -1301,7 +1313,7 @@ class SahiPipeline:
 
         stats = self._stats(
             stem, dets, det_time, cls_time, str(img_out_dir), skip_stats,
-            boxes_json=str(json_path), boxes_csv=str(csv_path),
+            boxes_json=boxes_json, boxes_csv=boxes_csv,
             cls_preprocess_s=cls_pre_s, cls_infer_s=cls_inf_s,
         )
         _log(f"统计: 钻石 {stats['total_diamonds']} 个 | "
@@ -1582,6 +1594,7 @@ class SahiDetectOnlyPipeline:
         downsample_interpolation: str = "area",
         save_visualization: bool = False,
         save_crops: bool = False,
+        save_boxes: bool = False,
         crop_padding: int = 15,
     ):
         self.detector = detector
@@ -1591,6 +1604,7 @@ class SahiDetectOnlyPipeline:
         self.downsample_interpolation = downsample_interpolation or "area"
         self.save_visualization = bool(save_visualization)
         self.save_crops = bool(save_crops)
+        self.save_boxes = bool(save_boxes)
         self.crop_padding = int(crop_padding)
 
     def process_image(
@@ -1668,15 +1682,20 @@ class SahiDetectOnlyPipeline:
             )
             _log(f"裁剪图已保存: {crop_dir.name}/")
 
-        boxes = detections_to_opencv_boxes(dets, with_classification=False)
-        json_path, csv_path = write_detect_boxes_files(
-            img_out_dir,
-            f"{stem}.jpg",
-            detect_size,
-            boxes,
-            with_classification=False,
-        )
-        _log(f"坐标已保存: {json_path.name}, {csv_path.name}")
+        boxes_json, boxes_csv = "", ""
+        if self.save_boxes:
+            boxes = detections_to_opencv_boxes(dets, with_classification=False)
+            json_path, csv_path = write_detect_boxes_files(
+                img_out_dir,
+                f"{stem}.jpg",
+                detect_size,
+                boxes,
+                with_classification=False,
+            )
+            boxes_json, boxes_csv = str(json_path), str(csv_path)
+            _log(f"坐标已保存: {json_path.name}, {csv_path.name}")
+        else:
+            _log("跳过位置文件（未勾选）")
 
         vis_path = ""
         if self.save_visualization and dets:
@@ -1703,8 +1722,8 @@ class SahiDetectOnlyPipeline:
             "downsampled": did_resize,
             "downsample_interpolation": self.downsample_interpolation if did_resize else "",
             "downsampled_image": downsampled_path,
-            "boxes_json": str(json_path),
-            "boxes_csv": str(csv_path),
+            "boxes_json": boxes_json,
+            "boxes_csv": boxes_csv,
             "visualization_detection": vis_path,
         }
 

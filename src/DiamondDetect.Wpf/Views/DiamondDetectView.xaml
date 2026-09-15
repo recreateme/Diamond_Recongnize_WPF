@@ -28,7 +28,7 @@
                 <StackPanel>
                     <CheckBox Content="仅检测定位（不分类）"
                               IsChecked="{Binding DetectOnly}" Margin="0,0,0,8"
-                              ToolTip="只输出 detect_boxes.json / .csv，不跑朝向分类"/>
+                              ToolTip="不跑朝向分类；坐标需另勾「输出位置文件」才会落盘"/>
                     <WrapPanel Orientation="Horizontal" IsEnabled="{Binding DetectOnly}">
                         <CheckBox Content="检测前下采样，最长边"
                                   VerticalAlignment="Center"
@@ -53,10 +53,13 @@
                     <CheckBox Content="保存裁剪切片 crop/" Margin="0,0,0,8"
                               IsChecked="{Binding SaveCrops}"
                               ToolTip="完整模式按类别分子目录；仅检测为平铺编号图"/>
-                    <CheckBox Content="完成后计算均匀度"
+                    <CheckBox Content="输出位置文件" Margin="0,0,0,8"
+                              IsChecked="{Binding SaveBoxes}"
+                              ToolTip="写出每图 detect_boxes.json / detect_boxes.csv（OpenCV 绝对坐标）"/>
+                    <CheckBox Content="计算均匀度"
                               IsChecked="{Binding RunUniformityAfter}"
-                              IsEnabled="{Binding DetectOnly, Converter={StaticResource InvertBool}}"
-                              ToolTip="仅完整模式；写入 uniformity_scores.json / uniformity_summary.csv"/>
+                              IsEnabled="{Binding CanRunUniformity}"
+                              ToolTip="需完整模式且已勾选「输出位置文件」；写入 uniformity_scores.json / uniformity_summary.csv"/>
                 </StackPanel>
             </GroupBox>
         </Grid>
