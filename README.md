@@ -1,7 +1,7 @@
 # 钻石缺陷图像分类系统（WPF）
 
 工业钻石缺陷**三分类**桌面应用：**WPF** + `python_core` 算法。  
-现行权重为真 3 类（`棱边朝上` / `点朝上` / `面朝上`，**EfficientNetV2-S**）。当前 `checkpoints/` 验证 Macro-F1 ≈ **0.82**（均衡 corrections 子集重训）。加载历史 5 类权重时，应用侧仍排除「局部破损」「断钻」后 argmax。
+现行权重为真 3 类（`棱边朝上` / `点朝上` / `面朝上`，**EfficientNetV2-S**）。当前 `checkpoints/` 为 2026-09-18 均衡 corrections（面:棱边:点=2:2:1）微调正式版：全量 corrections 上 Acc≈**0.83**、Macro-F1≈**0.66**（均衡内 val Macro-F1≈0.75）。详见 [python_core/docs/分类模型现状与下一步.md](python_core/docs/分类模型现状与下一步.md)。加载历史 5 类权重时，应用侧仍排除「局部破损」「断钻」后 argmax。
 
 **功能、算法与模型配置请先读：** [docs/应用功能与算法说明.md](docs/应用功能与算法说明.md)
 
@@ -18,6 +18,7 @@
 | [docs/钻石均匀度评分模块说明.md](docs/钻石均匀度评分模块说明.md) | 均匀度算法细则 |
 | [docs/钻石检测低分辨率漏检优化方案.md](docs/钻石检测低分辨率漏检优化方案.md) | 漏检优化笔记 |
 | [python_core/README.md](python_core/README.md) | 算法模块索引 |
+| [python_core/docs/分类模型现状与下一步.md](python_core/docs/分类模型现状与下一步.md) | 现行分类指标与精度下一步 |
 | [python_core/docs/分类推理速度优化建议.md](python_core/docs/分类推理速度优化建议.md) | 批测瓶颈与下一步速度优化 |
 
 ## 快速开始（开发）

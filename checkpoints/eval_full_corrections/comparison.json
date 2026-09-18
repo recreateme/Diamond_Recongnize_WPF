@@ -1,0 +1,108 @@
+{
+  "prod_current": {
+    "model": "prod_current",
+    "checkpoint": "D:\\Develop\\diamond_detect_wpf\\checkpoints\\best_model.pt",
+    "ckpt_macro_f1_meta": 0.817711370808781,
+    "eval_dir": "D:\\迅雷下载\\corrections",
+    "n": 2793,
+    "accuracy": 0.7354099534550662,
+    "macro_f1": 0.5122584326774543,
+    "weighted_f1": 0.7760964365847053,
+    "per_class": {
+      "棱边朝上": {
+        "precision": 0.4127272727272727,
+        "recall": 0.6151761517615176,
+        "f1": 0.4940152339499456,
+        "support": 369
+      },
+      "点朝上": {
+        "precision": 0.12424242424242424,
+        "recall": 0.6029411764705882,
+        "f1": 0.20603015075376885,
+        "support": 68
+      },
+      "面朝上": {
+        "precision": 0.9336121275483533,
+        "recall": 0.7580645161290323,
+        "f1": 0.8367299133286484,
+        "support": 2356
+      }
+    },
+    "confusion_matrix": [
+      [
+        227,
+        31,
+        111
+      ],
+      [
+        11,
+        41,
+        16
+      ],
+      [
+        312,
+        258,
+        1786
+      ]
+    ],
+    "classes": [
+      "棱边朝上",
+      "点朝上",
+      "面朝上"
+    ],
+    "report_text": "              precision    recall  f1-score   support\n\n        棱边朝上     0.4127    0.6152    0.4940       369\n         点朝上     0.1242    0.6029    0.2060        68\n         面朝上     0.9336    0.7581    0.8367      2356\n\n    accuracy                         0.7354      2793\n   macro avg     0.4902    0.6587    0.5123      2793\nweighted avg     0.8451    0.7354    0.7761      2793\n"
+  },
+  "ft_balanced_221": {
+    "model": "ft_balanced_221",
+    "checkpoint": "D:\\Develop\\diamond_detect_wpf\\checkpoints_ft_balanced_221\\best_model.pt",
+    "ckpt_macro_f1_meta": 0.752154327697943,
+    "eval_dir": "D:\\迅雷下载\\corrections",
+    "n": 2793,
+    "accuracy": 0.8338703902613677,
+    "macro_f1": 0.6546609646658,
+    "weighted_f1": 0.8672010871592282,
+    "per_class": {
+      "棱边朝上": {
+        "precision": 0.6923076923076923,
+        "recall": 0.8536585365853658,
+        "f1": 0.7645631067961165,
+        "support": 369
+      },
+      "点朝上": {
+        "precision": 0.17827298050139276,
+        "recall": 0.9411764705882353,
+        "f1": 0.2997658079625293,
+        "support": 68
+      },
+      "面朝上": {
+        "precision": 0.9853461344113188,
+        "recall": 0.8276740237691002,
+        "f1": 0.8996539792387543,
+        "support": 2356
+      }
+    },
+    "confusion_matrix": [
+      [
+        315,
+        26,
+        28
+      ],
+      [
+        3,
+        64,
+        1
+      ],
+      [
+        137,
+        269,
+        1950
+      ]
+    ],
+    "classes": [
+      "棱边朝上",
+      "点朝上",
+      "面朝上"
+    ],
+    "report_text": "              precision    recall  f1-score   support\n\n        棱边朝上     0.6923    0.8537    0.7646       369\n         点朝上     0.1783    0.9412    0.2998        68\n         面朝上     0.9853    0.8277    0.8997      2356\n\n    accuracy                         0.8339      2793\n   macro avg     0.6186    0.8742    0.6547      2793\nweighted avg     0.9270    0.8339    0.8672      2793\n"
+  }
+}
