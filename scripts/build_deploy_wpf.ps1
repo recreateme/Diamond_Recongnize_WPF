@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   组装机台交付包：WPF 宿主 + python_core +（可选）Python 运行时 + checkpoints + YOLO。
 
