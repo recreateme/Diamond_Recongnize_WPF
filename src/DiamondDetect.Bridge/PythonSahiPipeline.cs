@@ -51,6 +51,7 @@ public sealed class PythonSahiPipeline : ISahiPipeline
 
         var allStats = new List<SahiImageStats>();
         var total = imagePaths.Count;
+        var skipSummary = "";
 
         try
         {
@@ -109,16 +110,61 @@ public sealed class PythonSahiPipeline : ISahiPipeline
             var cancelBridge = new CancellationBridge(cancellationToken);
             Func<bool> shouldStop = cancelBridge.ShouldStop;
 
-            for (var i = 0; i < imagePaths.Count; i++)
+            // ── 整盘批量：只处理"检出钻石的 tile 及其 8 邻域"，跳过盘外空白图 ──
+            // 调度逻辑在 python_core/tile_scheduler.py（有单测）；这里只负责逐张取下一张、回报检出数。
+            // 调度器不可用或本批不是整盘（文件名无 tile 编号 / 覆盖不全）时自动退回逐张处理。
+            dynamic sched = null!;
+            var useSched = false;
+            if (options.SkipEmptyTiles && total >= 8)
+            {
+                try
+                {
+                    dynamic tsMod = Py.Import("tile_scheduler");
+                    var names = imagePaths.Select(p => Path.GetFileName(p)).ToArray();
+                    sched = tsMod.TileScheduler(
+                        names,
+                        options.TileGridRows,
+                        options.TileGridCols,
+                        audit_count: options.SkipAuditCount);
+                    useSched = (bool)sched.enabled;
+                    progress?.Report(new SahiProgress
+                    {
+                        Current = 0,
+                        Total = total,
+                        Message = (string)sched.status_text(),
+                    });
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    useSched = false; // 调度模块出问题不能影响主流程
+                }
+            }
+
+            var ordered = new SahiImageStats?[total];
+            var doneCount = 0;
+            while (true)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+
+                int i;
+                if (useSched)
+                {
+                    i = (int)sched.next_index();
+                    if (i < 0) break;
+                }
+                else
+                {
+                    if (doneCount >= total) break;
+                    i = doneCount;
+                }
+
                 var imgPath = imagePaths[i];
                 var name = Path.GetFileName(imgPath);
                 progress?.Report(new SahiProgress
                 {
-                    Current = i,
+                    Current = doneCount,
                     Total = total,
-                    Message = $"[{i + 1}/{total}] {name}",
+                    Message = $"[{doneCount + 1}/{total}] {name}",
                 });
 
                 SahiImageStats stats;
@@ -146,16 +192,61 @@ public sealed class PythonSahiPipeline : ISahiPipeline
                     };
                 }
 
+                ordered[i] = stats;
                 allStats.Add(stats);
+                doneCount++;
+                if (useSched)
+                    sched.report(i, stats.TotalDiamonds, !string.IsNullOrEmpty(stats.Error));
+
                 progress?.Report(new SahiProgress
                 {
-                    Current = i + 1,
+                    Current = doneCount,
                     Total = total,
                     Message = string.IsNullOrEmpty(stats.Error)
-                        ? $"[{i + 1}/{total}] 完成 {stats.Image} · {stats.TotalDiamonds} 颗"
-                        : $"[{i + 1}/{total}] 失败 {stats.Image}",
+                        ? $"[{doneCount}/{total}] 完成 {stats.Image} · {stats.TotalDiamonds} 颗"
+                        : $"[{doneCount}/{total}] 失败 {stats.Image}",
                     LastImage = stats,
                 });
+            }
+
+            // 调度器没处理的图 = 判定为盘外空白图：补一行 0 颗、0 耗时的记录，
+            // 让 summary.csv 仍是每张图一行（与历史表头一致），并按原输入顺序输出。
+            if (useSched)
+            {
+                var skipped = 0;
+                for (var k = 0; k < total; k++)
+                {
+                    if (ordered[k] != null) continue;
+                    var st = new SahiImageStats
+                    {
+                        Image = Path.GetFileNameWithoutExtension(imagePaths[k]) + ".jpg",
+                        TotalDiamonds = 0,
+                        DetectOnly = options.DetectOnly,
+                        Skipped = true,
+                    };
+                    ordered[k] = st;
+                    skipped++;
+                    progress?.Report(new SahiProgress
+                    {
+                        Current = total,
+                        Total = total,
+                        Message = $"已跳过 {st.Image}（盘外空白图）",
+                        LastImage = st,
+                    });
+                }
+
+                allStats.Clear();
+                foreach (var st in ordered)
+                    if (st != null) allStats.Add(st);
+
+                try
+                {
+                    skipSummary = skipped > 0 ? (string)sched.summary_text() : "";
+                }
+                catch (Exception)
+                {
+                    skipSummary = skipped > 0 ? $"跳过 {skipped} 张盘外空白图" : "";
+                }
             }
         }
 
@@ -168,7 +259,9 @@ public sealed class PythonSahiPipeline : ISahiPipeline
         {
             Current = total,
             Total = total,
-            Message = cancellationToken.IsCancellationRequested ? "已停止" : "处理完成",
+            Message = cancellationToken.IsCancellationRequested
+                ? "已停止"
+                : (string.IsNullOrEmpty(skipSummary) ? "处理完成" : $"处理完成 · {skipSummary}"),
         });
         return allStats;
         }

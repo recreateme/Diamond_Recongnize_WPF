@@ -1,6 +1,6 @@
 {
   "project_root": "D:\\Develop\\diamond_detect_wpf\\python_core",
-  "data_dir": "D:\\迅雷下载\\corrections_balanced_2_2_1",
+  "data_dir": "D:\\迅雷下载\\corrections_balanced_2_2_1_v2",
   "img_size": 256,
   "num_classes": 3,
   "classes": [
@@ -8,8 +8,8 @@
     "点朝上",
     "面朝上"
   ],
-  "best_val_acc": 0.76,
-  "best_macro_f1": 0.752154,
+  "best_val_acc": 0.793103,
+  "best_macro_f1": 0.727844,
   "model_arch": "efficientnet_v2_s",
   "use_focal_loss": false,
   "use_class_weight": true,

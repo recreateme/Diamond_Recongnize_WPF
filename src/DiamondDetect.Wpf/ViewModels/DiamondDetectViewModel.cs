@@ -63,6 +63,7 @@ public partial class DiamondDetectViewModel : ObservableObject
     [ObservableProperty] private bool saveCrops;
     [ObservableProperty] private bool saveBoxes;
     [ObservableProperty] private bool runUniformityAfter;
+    [ObservableProperty] private bool skipEmptyTiles = true;
     [ObservableProperty] private bool downsampleEnabled;
     [ObservableProperty] private int downsampleMaxSide = 2560;
     [ObservableProperty] private string selectedInterpolation = "area";
@@ -104,6 +105,7 @@ public partial class DiamondDetectViewModel : ObservableObject
     partial void OnSaveVisualizationChanged(bool value) => PersistOutputPrefs();
     partial void OnSaveCropsChanged(bool value) => PersistOutputPrefs();
     partial void OnRunUniformityAfterChanged(bool value) => PersistOutputPrefs();
+    partial void OnSkipEmptyTilesChanged(bool value) => PersistOutputPrefs();
 
     private void LoadOutputPrefsFromConfig()
     {
@@ -115,6 +117,7 @@ public partial class DiamondDetectViewModel : ObservableObject
             SaveCrops = c.UiSaveCrops;
             SaveBoxes = c.UiSaveBoxes;
             RunUniformityAfter = c.UiRunUniformity && !DetectOnly && c.UiSaveBoxes;
+            SkipEmptyTiles = c.UiSkipEmptyTiles;
         }
         finally
         {
@@ -131,15 +134,18 @@ public partial class DiamondDetectViewModel : ObservableObject
         var wantCrops = SaveCrops;
         var wantBoxes = SaveBoxes;
         var wantUni = RunUniformityAfter && !DetectOnly && SaveBoxes;
+        var wantSkip = SkipEmptyTiles;
         if (c.UiSaveVisualization == wantVis
             && c.UiSaveCrops == wantCrops
             && c.UiSaveBoxes == wantBoxes
-            && c.UiRunUniformity == wantUni)
+            && c.UiRunUniformity == wantUni
+            && c.UiSkipEmptyTiles == wantSkip)
             return;
         c.UiSaveVisualization = wantVis;
         c.UiSaveCrops = wantCrops;
         c.UiSaveBoxes = wantBoxes;
         c.UiRunUniformity = wantUni;
+        c.UiSkipEmptyTiles = wantSkip;
         try
         {
             _configService.Save(c);
@@ -255,6 +261,10 @@ public partial class DiamondDetectViewModel : ObservableObject
             SaveVisualization = SaveVisualization,
             SaveCrops = SaveCrops,
             SaveBoxes = SaveBoxes,
+            SkipEmptyTiles = SkipEmptyTiles,
+            TileGridRows = Math.Max(1, cfg.TileGridRows),
+            TileGridCols = Math.Max(1, cfg.TileGridCols),
+            SkipAuditCount = Math.Max(0, cfg.SkipAuditCount),
         };
 
         var progress = new Progress<SahiProgress>(p =>
@@ -373,9 +383,9 @@ public partial class DiamondDetectViewModel : ObservableObject
         Rows.Add(new SahiResultRow
         {
             Image = stats.Image,
-            DiamondsText = stats.TotalDiamonds.ToString(),
-            Distribution = stats.DefectDistribution,
-            TimeText = $"{stats.TotalTimeS:0.00}",
+            DiamondsText = stats.Skipped ? "跳过" : stats.TotalDiamonds.ToString(),
+            Distribution = stats.Skipped ? "盘外空白图" : stats.DefectDistribution,
+            TimeText = stats.Skipped ? "-" : $"{stats.TotalTimeS:0.00}",
             OutputDir = stats.OutputDir,
         });
         UpdateTotal();

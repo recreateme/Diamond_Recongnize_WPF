@@ -18,13 +18,14 @@ WPF 与 `python_core` 必须遵守下列契约，变更时同步更新本文件�
 
 字段名与原 `defect_detect` 一致：
 
-`pt_path`, `onnx_path`, `data_dir`, `corrections_dir`, `use_gpu`, `enable_local_diagnostics`, `yolo_path`, `sahi_device`, `sahi_slice_size`, `sahi_overlap`, `sahi_det_conf`, `sahi_batch_size`, `sahi_crop_padding`, `sahi_output_dir`, `sahi_ios_thresh`, `sahi_min_area_ratio`, `sahi_max_aspect_ratio`, `sahi_edge_filter`, `sahi_edge_margin_px`, `uniformity_conf_threshold`, `ui_save_visualization`, `ui_save_crops`, `ui_save_boxes`, `ui_run_uniformity`
+`pt_path`, `onnx_path`, `data_dir`, `corrections_dir`, `use_gpu`, `enable_local_diagnostics`, `yolo_path`, `sahi_device`, `sahi_slice_size`, `sahi_overlap`, `sahi_det_conf`, `sahi_batch_size`, `sahi_crop_padding`, `sahi_output_dir`, `sahi_ios_thresh`, `sahi_min_area_ratio`, `sahi_max_aspect_ratio`, `sahi_edge_filter`, `sahi_edge_margin_px`, `uniformity_conf_threshold`, `ui_save_visualization`, `ui_save_crops`, `ui_save_boxes`, `ui_run_uniformity`, `ui_skip_empty_tiles`, `tile_grid_rows`, `tile_grid_cols`, `skip_audit_count`
 
 - 机台包内路径使用**相对路径**（相对应用根目录）。
 - 废弃键 `conf_threshold` 忽略。
 - `enable_local_diagnostics`：默认 `false`；为 `true` 时仅写入本机 `logs/diag.jsonl`，不上传。
 - `uniformity_conf_threshold`：均匀度模块 YOLO `det_conf` 过滤阈值，默认 `0.25`。
 - `ui_save_*` / `ui_run_uniformity`：钻石检测页「输出选项」勾选状态；默认全 `false`；勾选变更即写回；处理模式（仅检测定位等）不持久化。
+- `ui_skip_empty_tiles`：整盘批量跳过盘外空白图（默认 `true`）；`tile_grid_rows`/`tile_grid_cols` 默认 24；`skip_audit_count` 默认 3。详见 [整盘批量跳过空白图说明.md](整盘批量跳过空白图说明.md)。
 
 ## 检测结果（DetectionResult）
 

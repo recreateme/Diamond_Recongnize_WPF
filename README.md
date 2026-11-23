@@ -1,7 +1,7 @@
 # 钻石缺陷图像分类系统（WPF）
 
 工业钻石缺陷**三分类**桌面应用：**WPF** + `python_core` 算法。  
-现行权重为真 3 类（`棱边朝上` / `点朝上` / `面朝上`，**EfficientNetV2-S**）。当前 `checkpoints/` 为 2026-09-18 均衡 corrections（面:棱边:点=2:2:1）微调正式版：全量 corrections 上 Acc≈**0.83**、Macro-F1≈**0.66**（均衡内 val Macro-F1≈0.75）。详见 [python_core/docs/分类模型现状与下一步.md](python_core/docs/分类模型现状与下一步.md)。加载历史 5 类权重时，应用侧仍排除「局部破损」「断钻」后 argmax。
+现行权重为真 3 类（`棱边朝上` / `点朝上` / `面朝上`，**EfficientNetV2-S**）。当前 `checkpoints/` 为 2026-11-23 最新 corrections 均衡微调正式版（面:棱边:点=2:2:1）：全量 Acc≈**0.83**、Macro-F1≈**0.63**（点朝上 Precision 仍偏低）。详见 [python_core/docs/分类模型现状与下一步.md](python_core/docs/分类模型现状与下一步.md)。加载历史 5 类权重时，应用侧仍排除「局部破损」「断钻」后 argmax。
 
 **功能、算法与模型配置请先读：** [docs/应用功能与算法说明.md](docs/应用功能与算法说明.md)
 

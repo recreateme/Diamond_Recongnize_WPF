@@ -171,6 +171,10 @@ $deployCfg = [ordered]@{
     ui_save_crops           = $false
     ui_save_boxes           = $false
     ui_run_uniformity       = $false
+    ui_skip_empty_tiles     = $true
+    tile_grid_rows          = 24
+    tile_grid_cols          = 24
+    skip_audit_count        = 3
 }
 $deployCfg | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $DistRoot "app_config.json") -Encoding UTF8
 

@@ -42,6 +42,9 @@
                                   ItemsSource="{Binding InterpolationOptions}"
                                   SelectedItem="{Binding SelectedInterpolation}"/>
                     </WrapPanel>
+                    <CheckBox Content="整盘批量：跳过盘外空白图" Margin="0,4,0,0"
+                              IsChecked="{Binding SkipEmptyTiles}"
+                              ToolTip="文件名为 tile 编号（1~576）且覆盖整盘时生效：只处理有钻石的图及其相邻图，盘外空白图不跑检测（每盘约省 7%~15% 时间），并随机抽检回查防漏；选了部分图像时自动不启用"/>
                 </StackPanel>
             </GroupBox>
 

@@ -19,6 +19,7 @@
 | `inference_engine.py` | 开发版 PyTorch/ONNX 分类 |
 | `inference_engine_onnx.py` | 机台 ONNX Runtime 分类 |
 | `sahi_detector.py` | SAHI + YOLO 大图流水线；重叠 ≤280px；可选 `crop/` 落盘；分类耗时拆预处理/推理 |
+| `tile_scheduler.py` | 整盘批量跳过盘外空白 tile（邻域扩展 + 抽检回查） |
 | `diamond_uniformity.py` | 单 tile 均匀度评分 + `uniformity_vis` 可视化 |
 | `train.py` | EfficientNetV2-S 两阶段训练 / 微调 / ONNX 导出；阶段二冻结 BN；写出 `training.log`、`training_log.csv`、`training_history.json`、`training_curves.png`、`classification_report.txt` |
 | `analyze_image_sizes.py` | 图像尺寸分析 |

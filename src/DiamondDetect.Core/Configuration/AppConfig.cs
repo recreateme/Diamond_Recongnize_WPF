@@ -85,6 +85,22 @@ public sealed class AppConfig
     [JsonPropertyName("ui_run_uniformity")]
     public bool UiRunUniformity { get; set; }
 
+    /// <summary>检测页：整盘批量时跳过盘外空白图（默认开，跨会话记住）。</summary>
+    [JsonPropertyName("ui_skip_empty_tiles")]
+    public bool UiSkipEmptyTiles { get; set; } = true;
+
+    /// <summary>整盘 tile 网格行数（编号按行优先）。</summary>
+    [JsonPropertyName("tile_grid_rows")]
+    public int TileGridRows { get; set; } = 24;
+
+    /// <summary>整盘 tile 网格列数。</summary>
+    [JsonPropertyName("tile_grid_cols")]
+    public int TileGridCols { get; set; } = 24;
+
+    /// <summary>跳过空白图后的随机抽检回查张数。</summary>
+    [JsonPropertyName("skip_audit_count")]
+    public int SkipAuditCount { get; set; } = 3;
+
     public static AppConfig CreateDefault(bool deployMode)
     {
         var cfg = new AppConfig();

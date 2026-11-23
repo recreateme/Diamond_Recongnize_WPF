@@ -36,6 +36,19 @@ public sealed class SahiRunOptions
     public bool EdgeFilter { get; init; } = true;
     public int EdgeMarginPx { get; init; } = 20;
 
+    /// <summary>
+    /// 整盘批量时跳过盘外空白图：只处理"检出钻石的 tile 及其 8 邻域"，其余 tile 不跑检测。
+    /// 仅当文件名带 tile 编号且覆盖整盘网格时生效，否则自动退回逐张处理。
+    /// </summary>
+    public bool SkipEmptyTiles { get; init; } = true;
+
+    /// <summary>tile 网格行/列数（编号按行优先）。</summary>
+    public int TileGridRows { get; init; } = 24;
+    public int TileGridCols { get; init; } = 24;
+
+    /// <summary>跳过后随机抽检回查的张数（0 = 不抽检）；抽到含钻图会退回处理全部剩余图像。</summary>
+    public int SkipAuditCount { get; init; } = 3;
+
     /// <summary>仅 SAHI 检测定位，不分类、不写 summary。</summary>
     public bool DetectOnly { get; init; }
 
@@ -60,6 +73,9 @@ public sealed class SahiRunOptions
 public sealed class SahiImageStats
 {
     public string Image { get; set; } = "";
+
+    /// <summary>被"跳过盘外空白图"判定为无需检测（未跑检测，各项耗时为 0）。</summary>
+    public bool Skipped { get; set; }
     public int TotalDiamonds { get; set; }
     public Dictionary<string, int> DefectCounts { get; set; } = new();
     public double DetectionTimeS { get; set; }

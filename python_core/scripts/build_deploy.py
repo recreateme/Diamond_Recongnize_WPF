@@ -346,6 +346,10 @@ _DEPLOY_APP_CONFIG = {
     "ui_save_crops": False,
     "ui_save_boxes": False,
     "ui_run_uniformity": False,
+    "ui_skip_empty_tiles": True,
+    "tile_grid_rows": 24,
+    "tile_grid_cols": 24,
+    "skip_audit_count": 3,
 }
 
 
